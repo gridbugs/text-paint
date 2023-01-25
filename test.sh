@@ -1,3 +1,3 @@
 #!/bin/sh
 
-cargo run -- --config resources/test_config.toml
+cargo run -- --palette resources/test_palette.toml

@@ -2,10 +2,10 @@ use gridbugs::chargrid_wgpu;
 use std::path::PathBuf;
 
 mod app;
-mod config;
+mod palette;
 
 struct Args {
-    config_path: PathBuf,
+    palette_path: PathBuf,
     terminal: bool,
 }
 
@@ -13,11 +13,11 @@ impl Args {
     fn parser() -> impl meap::Parser<Item = Self> {
         meap::let_map! {
             let {
-                config_path = opt_req("PATH", "config");
-                terminal = flag("terminal").desc("run in a terminal");
+                palette_path = opt_req("PATH", "palette").name('p');
+                terminal = flag("terminal").name('t').desc("run in a terminal");
             } in {
                 Self {
-                    config_path,
+                    palette_path,
                     terminal,
                 }
             }
@@ -33,7 +33,7 @@ fn wgpu_context() -> chargrid_wgpu::Context {
             normal: include_bytes!("./fonts/PxPlus_IBM_CGAthin.ttf").to_vec(),
             bold: include_bytes!("./fonts/PxPlus_IBM_CGA.ttf").to_vec(),
         },
-        title: "Gridbugs Roguelike Tutorial".to_string(),
+        title: "Text Paint".to_string(),
         window_dimensions_px: Dimensions {
             width: 960.,
             height: 720.,
@@ -56,10 +56,10 @@ fn wgpu_context() -> chargrid_wgpu::Context {
 fn main() {
     use meap::Parser;
     let Args {
-        config_path,
+        palette_path,
         terminal,
     } = Args::parser().with_help_default().parse_env_or_exit();
-    let app = app::app(config_path);
+    let app = app::app(palette_path);
     if terminal {
         use gridbugs::chargrid_ansi_terminal::{Context, XtermTrueColour};
         let context = Context::new().expect("Failed to initialize terminal");

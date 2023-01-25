@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 use toml;
 
 #[derive(Debug)]
-pub struct Config {
+pub struct Palette {
     pub fg: Vec<Rgb24>,
     pub bg: Vec<Rgb24>,
     pub ch: Vec<char>,
@@ -37,7 +37,7 @@ mod hex_rgb24 {
     }
 }
 
-mod config_toml {
+mod palette_toml {
     use super::Rgb24;
 
     fn parse_hex_rgb24_str(s: &str) -> Result<Rgb24, String> {
@@ -89,15 +89,15 @@ mod config_toml {
         parse_contents(contents)
     }
 
-    pub fn parse_config(toml: &toml::Value) -> Result<super::Config, String> {
+    pub fn parse_palette(toml: &toml::Value) -> Result<super::Palette, String> {
         let fg = parse_field(toml, "fg", |v| parse_array(v, parse_rgb24))?;
         let bg = parse_field(toml, "bg", |v| parse_array(v, parse_rgb24))?;
         let ch = parse_field(toml, "ch", |v| parse_array(v, parse_ch))?;
-        Ok(super::Config { fg, bg, ch })
+        Ok(super::Palette { fg, bg, ch })
     }
 }
 
-impl Config {
+impl Palette {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         use toml::Value;
         let string =
@@ -105,6 +105,6 @@ impl Config {
         let toml = string
             .parse::<Value>()
             .map_err(|e| format!("failed to parse file ({})", e))?;
-        config_toml::parse_config(&toml)
+        palette_toml::parse_palette(&toml)
     }
 }

@@ -10,10 +10,16 @@ toml = "0.6"
 nom = "7.1"
 
 [dependencies.gridbugs]
-version = "0.5"
+version = "0.6"
 features = [
     "chargrid",
     "chargrid_wgpu",
     "chargrid_ansi_terminal",
     "rgb_int",
 ]
+
+#[patch.crates-io]
+#chargrid_common = { path = "/home/s/src/chargrid/common" }
+#chargrid = { path = "/home/s/src/chargrid/chargrid" }
+#chargrid_core = { path = "/home/s/src/chargrid/core" }
+#chargrid_input = { path = "/home/s/src/chargrid/input" }
