@@ -6,6 +6,7 @@ mod config;
 
 struct Args {
     config_path: PathBuf,
+    terminal: bool,
 }
 
 impl Args {
@@ -13,9 +14,11 @@ impl Args {
         meap::let_map! {
             let {
                 config_path = opt_req("PATH", "config");
+                terminal = flag("terminal").desc("run in a terminal");
             } in {
                 Self {
                     config_path,
+                    terminal,
                 }
             }
         }
@@ -52,7 +55,18 @@ fn wgpu_context() -> chargrid_wgpu::Context {
 
 fn main() {
     use meap::Parser;
-    let Args { config_path } = Args::parser().with_help_default().parse_env_or_exit();
-    let context = wgpu_context();
-    context.run(app::app(config_path));
+    let Args {
+        config_path,
+        terminal,
+    } = Args::parser().with_help_default().parse_env_or_exit();
+    let app = app::app(config_path);
+    if terminal {
+        use gridbugs::chargrid_ansi_terminal::{Context, XtermTrueColour};
+        let context = Context::new().expect("Failed to initialize terminal");
+        let colour = XtermTrueColour;
+        context.run(app, colour);
+    } else {
+        let context = wgpu_context();
+        context.run(app);
+    }
 }
