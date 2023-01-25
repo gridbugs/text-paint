@@ -1,76 +1,100 @@
-use crate::parse_colour::parse_hex_rgb24;
 use gridbugs::rgb_int::Rgb24;
 use std::{fs, path::Path};
 use toml;
 
 #[derive(Debug)]
-pub struct PaletteEntry {
-    pub character: char,
-    pub foreground: Rgb24,
-    pub background: Option<Rgb24>,
-}
-
-#[derive(Debug)]
 pub struct Config {
-    palette: Vec<PaletteEntry>,
+    pub fg: Vec<Rgb24>,
+    pub bg: Vec<Rgb24>,
+    pub ch: Vec<char>,
 }
 
-fn parse_palette_entry_toml(toml: &toml::Value) -> Result<PaletteEntry, String> {
-    let mut parts = Vec::new();
-    for part in toml
-        .as_array()
-        .ok_or_else(|| format!("palette entry is not array ({:?})", toml))?
-    {
-        let part = part
+mod hex_rgb24 {
+    use super::Rgb24;
+    use nom::{
+        bytes::complete::{tag, take_while_m_n},
+        combinator::map_res,
+        sequence::tuple,
+        IResult,
+    };
+
+    fn from_hex(input: &str) -> Result<u8, std::num::ParseIntError> {
+        u8::from_str_radix(input, 16)
+    }
+
+    fn is_hex_digit(c: char) -> bool {
+        c.is_digit(16)
+    }
+
+    fn hex_primary(input: &str) -> IResult<&str, u8> {
+        map_res(take_while_m_n(2, 2, is_hex_digit), from_hex)(input)
+    }
+
+    pub fn parse_hex_rgb24(input: &str) -> IResult<&str, Rgb24> {
+        let (input, _) = tag("#")(input)?;
+        let (input, (red, green, blue)) = tuple((hex_primary, hex_primary, hex_primary))(input)?;
+        Ok((input, Rgb24::new(red, green, blue)))
+    }
+}
+
+mod config_toml {
+    use super::Rgb24;
+
+    fn parse_hex_rgb24_str(s: &str) -> Result<Rgb24, String> {
+        let (_, rgb24) = super::hex_rgb24::parse_hex_rgb24(s)
+            .map_err(|e| format!("failed to parse hex rgb ({:?})", e))?;
+        Ok(rgb24)
+    }
+
+    fn parse_rgb24(toml: &toml::Value) -> Result<Rgb24, String> {
+        let str = toml
             .as_str()
-            .ok_or_else(|| format!("palette entry part is not string ({:?})", part))?;
-        parts.push(part);
+            .ok_or_else(|| format!("expected string, got {:?}", toml))?;
+        parse_hex_rgb24_str(str)
     }
-    let (character_str, foreground_str, maybe_background_str) = match &parts[..] {
-        [character_str, foreground_str] => (character_str, foreground_str, None),
-        [character_str, foreground_str, background_str] => {
-            (character_str, foreground_str, Some(background_str))
-        }
-        _ => {
-            return Err(format!(
-                "palette entry must have 2 or 3 components ({:?})",
-                parts
-            ))
-        }
-    };
-    let character = if character_str.len() == 1 {
-        character_str.chars().next().unwrap()
-    } else {
-        return Err(format!(
-            "first part must be single character (got \"{}\")",
-            character_str
-        ));
-    };
-    let (_, foreground) = parse_hex_rgb24(foreground_str)
-        .map_err(|e| format!("failed to parse foreground string ({:?})", e))?;
-    let background = if let Some(background_str) = maybe_background_str {
-        Some(
-            parse_hex_rgb24(background_str)
-                .map_err(|e| format!("failed to parse background string ({:?})", e))?
-                .1,
-        )
-    } else {
-        None
-    };
-    Ok(PaletteEntry {
-        character,
-        foreground,
-        background,
-    })
-}
 
-fn parse_palette_toml(toml: &toml::Value) -> Result<Vec<PaletteEntry>, String> {
-    let mut palette = Vec::new();
-    for entry in toml.as_array().ok_or("\"palette\" is not an array")?.iter() {
-        let palette_entry = parse_palette_entry_toml(entry)?;
-        palette.push(palette_entry);
+    fn parse_ch(toml: &toml::Value) -> Result<char, String> {
+        let str = toml
+            .as_str()
+            .ok_or_else(|| format!("expected string, got {:?}", toml))?;
+        if str.len() == 1 {
+            Ok(str.chars().next().unwrap())
+        } else {
+            Err(format!("expected string of length 1, got {}", str))
+        }
     }
-    Ok(palette)
+
+    fn parse_array<T, F: FnMut(&toml::Value) -> Result<T, String>>(
+        toml: &toml::Value,
+        mut parse_element: F,
+    ) -> Result<Vec<T>, String> {
+        let array = toml
+            .as_array()
+            .ok_or_else(|| format!("expected array, got {:?}", toml))?;
+        let mut ret = Vec::new();
+        for element in array {
+            ret.push(parse_element(element)?);
+        }
+        Ok(ret)
+    }
+
+    fn parse_field<T, F: FnMut(&toml::Value) -> Result<T, String>>(
+        toml: &toml::Value,
+        field: &str,
+        mut parse_contents: F,
+    ) -> Result<T, String> {
+        let contents = toml
+            .get(field)
+            .ok_or_else(|| format!("no such field \"{}\"", field))?;
+        parse_contents(contents)
+    }
+
+    pub fn parse_config(toml: &toml::Value) -> Result<super::Config, String> {
+        let fg = parse_field(toml, "fg", |v| parse_array(v, parse_rgb24))?;
+        let bg = parse_field(toml, "bg", |v| parse_array(v, parse_rgb24))?;
+        let ch = parse_field(toml, "ch", |v| parse_array(v, parse_ch))?;
+        Ok(super::Config { fg, bg, ch })
+    }
 }
 
 impl Config {
@@ -81,14 +105,6 @@ impl Config {
         let toml = string
             .parse::<Value>()
             .map_err(|e| format!("failed to parse file ({})", e))?;
-        let palette = parse_palette_toml(
-            toml.get("palette")
-                .ok_or("config is missing \"palette\" field")?,
-        )?;
-        Ok(Self { palette })
-    }
-
-    pub fn palette(&self) -> &[PaletteEntry] {
-        &self.palette
+        config_toml::parse_config(&toml)
     }
 }

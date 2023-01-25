@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 mod app;
 mod config;
-mod parse_colour;
 
 struct Args {
     config_path: PathBuf,
