@@ -1,5 +1,5 @@
 use crate::palette::Palette;
-use gridbugs::chargrid::{self, border::Border, control_flow::*, prelude::*};
+use gridbugs::chargrid::{self, border::Border, control_flow::*, prelude::*, text};
 use std::path::PathBuf;
 
 struct AppState {
@@ -12,9 +12,9 @@ impl Component for PaletteComponent {
     type Output = ();
     type State = AppState;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        chargrid::text::StyledString::plain_text("ch: ".to_string()).render(&(), ctx, fb);
-        chargrid::text::StyledString::plain_text("fg: ".to_string()).render(&(), ctx.add_y(1), fb);
-        chargrid::text::StyledString::plain_text("bg: ".to_string()).render(&(), ctx.add_y(2), fb);
+        text::StyledString::plain_text("ch: ".to_string()).render(&(), ctx, fb);
+        text::StyledString::plain_text("fg: ".to_string()).render(&(), ctx.add_y(1), fb);
+        text::StyledString::plain_text("bg: ".to_string()).render(&(), ctx.add_y(2), fb);
         let ctx = ctx.add_x(4);
         for (i, &ch) in state.palette.ch.iter().enumerate() {
             fb.set_cell_relative_to_ctx(
@@ -56,22 +56,65 @@ impl Component for PaletteComponent {
     }
 }
 
+struct ToolsComponent;
+
+impl Component for ToolsComponent {
+    type Output = ();
+    type State = AppState;
+    fn render(&self, _state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
+        text::StyledString::plain_text("Pencil".to_string()).render(&(), ctx, fb);
+        text::StyledString::plain_text("Line".to_string()).render(&(), ctx.add_y(2), fb);
+        text::StyledString::plain_text("Fill".to_string()).render(&(), ctx.add_y(1), fb);
+    }
+    fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, _event: Event) -> Self::Output {}
+    fn size(&self, _state: &Self::State, _ctx: Ctx) -> Size {
+        Size::new(8, 5)
+    }
+}
+
+struct CanvasComponent;
+
+impl Component for CanvasComponent {
+    type Output = ();
+    type State = AppState;
+    fn render(&self, _state: &Self::State, _ctx: Ctx, _fb: &mut FrameBuffer) {}
+    fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, _event: Event) -> Self::Output {}
+    fn size(&self, _state: &Self::State, ctx: Ctx) -> Size {
+        ctx.bounding_box.size()
+    }
+}
+
 struct GuiComponent {
     palette: Border<PaletteComponent>,
+    tools: Border<ToolsComponent>,
+    canvas: Border<CanvasComponent>,
 }
 
 impl GuiComponent {
-    fn new() -> Self {
+    fn border<C: Component>(component: C, title: &str) -> Border<C> {
         use chargrid::border::*;
-        let palette = Border {
-            component: PaletteComponent,
+        let colour = Rgba32::new_grey(127);
+        Border {
+            component,
             style: BorderStyle {
-                title: Some("Palette".to_string()),
+                title: Some(title.to_string()),
                 chars: BorderChars::double_line_light().with_title_separators('╡', '╞'),
+                foreground: colour,
+                title_style: Style::plain_text().with_foreground(colour),
+                padding: BorderPadding::all(0),
                 ..Default::default()
             },
-        };
-        Self { palette }
+        }
+    }
+    fn new() -> Self {
+        let palette = Self::border(PaletteComponent, "Palette");
+        let tools = Self::border(ToolsComponent, "Tools");
+        let canvas = Self::border(CanvasComponent, "Canvas");
+        Self {
+            palette,
+            tools,
+            canvas,
+        }
     }
 }
 
@@ -79,10 +122,19 @@ impl Component for GuiComponent {
     type Output = ();
     type State = AppState;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        let palette_ctx = ctx.add_y(
-            ctx.bounding_box.size().height() as i32 - self.palette.size(state, ctx).height() as i32,
-        );
+        let palette_size = self.palette.size(state, ctx);
+        let tools_size = self.tools.size(state, ctx);
+        let palette_ctx =
+            ctx.add_y(ctx.bounding_box.size().height() as i32 - palette_size.height() as i32);
+        let height_above_palette =
+            (ctx.bounding_box.size().height() as i32 - palette_size.height() as i32) as u32;
+        let tools_ctx = ctx.set_height(height_above_palette);
+        let canvas_ctx = ctx
+            .set_height(height_above_palette)
+            .add_x(tools_size.width() as i32);
         self.palette.render(state, palette_ctx, fb);
+        self.tools.render(state, tools_ctx, fb);
+        self.canvas.render(state, canvas_ctx, fb);
     }
     fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, _event: Event) -> Self::Output {}
     fn size(&self, _state: &Self::State, ctx: Ctx) -> Size {
