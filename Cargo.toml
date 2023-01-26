@@ -16,6 +16,7 @@ features = [
     "chargrid_wgpu",
     "chargrid_ansi_terminal",
     "rgb_int",
+    "grid_2d",
 ]
 
 #[patch.crates-io]

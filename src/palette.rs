@@ -93,6 +93,15 @@ mod palette_toml {
         let fg = parse_field(toml, "fg", |v| parse_array(v, parse_rgb24))?;
         let bg = parse_field(toml, "bg", |v| parse_array(v, parse_rgb24))?;
         let ch = parse_field(toml, "ch", |v| parse_array(v, parse_ch))?;
+        if fg.is_empty() {
+            return Err("fg must not be empty".to_string());
+        }
+        if bg.is_empty() {
+            return Err("bg must not be empty".to_string());
+        }
+        if ch.is_empty() {
+            return Err("ch must not be empty".to_string());
+        }
         Ok(super::Palette { fg, bg, ch })
     }
 }
