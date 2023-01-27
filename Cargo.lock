@@ -240,9 +240,9 @@ dependencies = [
 
 [[package]]
 name = "chargrid_core"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95c2826899469bf3d7463df5865c6d032596b7cefcac6365ab41565b3b6dfa31"
+checksum = "79078307d620905aadae080740529d54b579daa69b459eab2c8d3a349a0b46dd"
 dependencies = [
  "chargrid_input",
  "grid_2d",
@@ -528,6 +528,15 @@ dependencies = [
  "darling_core",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "direction"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c56672976b806b6fe8e41998c6d0503cd02479c6059c47451ce8addc7871271"
+dependencies = [
+ "coord_2d",
 ]
 
 [[package]]
@@ -858,6 +867,7 @@ dependencies = [
  "chargrid",
  "chargrid_ansi_terminal",
  "chargrid_wgpu",
+ "direction",
  "grid_2d",
  "rgb_int",
 ]

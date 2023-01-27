@@ -27,7 +27,7 @@ impl Args {
 
 fn wgpu_context() -> chargrid_wgpu::Context {
     use chargrid_wgpu::*;
-    const CELL_SIZE_PX: f64 = 16.;
+    const CELL_SIZE_PX: f64 = 12.;
     Context::new(Config {
         font_bytes: FontBytes {
             normal: include_bytes!("./fonts/PxPlus_IBM_CGAthin.ttf").to_vec(),
@@ -35,8 +35,8 @@ fn wgpu_context() -> chargrid_wgpu::Context {
         },
         title: "Text Paint".to_string(),
         window_dimensions_px: Dimensions {
-            width: 960.,
-            height: 720.,
+            width: 1280.,
+            height: 960.,
         },
         cell_dimensions_px: Dimensions {
             width: CELL_SIZE_PX,

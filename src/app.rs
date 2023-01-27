@@ -33,6 +33,7 @@ type PaletteIndices = PerPalette<PaletteIndex>;
 
 type PaletteHover = PerPalette<Option<PaletteIndex>>;
 
+#[derive(Clone, Copy)]
 enum Tool {
     Pencil,
     Line,
@@ -110,7 +111,7 @@ impl AppState {
             tools: Tool::all(),
             tool_index: 0,
             tool_hover: None,
-            canvas_state: CanvasState::new(Size::new(45, 30)),
+            canvas_state: CanvasState::new(Size::new(100, 80)),
             canvas_mouse_down_coord: None,
             canvas_hover: None,
         }
@@ -146,6 +147,36 @@ impl AppState {
     fn pencil_coord(&mut self, coord: Coord) {
         self.canvas_state
             .pencil_coord(coord, self.current_render_cell());
+    }
+
+    fn current_tool(&self) -> Tool {
+        self.tools[self.tool_index]
+    }
+
+    fn flood_fill(&mut self, coord: Coord) {
+        use gridbugs::direction::CardinalDirection;
+        use std::collections::{HashSet, VecDeque};
+        let mut queue = VecDeque::new();
+        let mut seen = HashSet::new();
+        let initial_cell = self.canvas_state.raster.get_checked(coord);
+        queue.push_front(coord);
+        seen.insert(coord);
+        while let Some(coord) = queue.pop_back() {
+            for d in CardinalDirection::all() {
+                let nei_coord = coord + d.coord();
+                if !seen.contains(&nei_coord) {
+                    if let Some(nei_cell) = self.canvas_state.raster.get(nei_coord) {
+                        if nei_cell == initial_cell {
+                            seen.insert(nei_coord);
+                            queue.push_front(nei_coord);
+                        }
+                    }
+                }
+            }
+        }
+        for coord in seen {
+            self.pencil_coord(coord);
+        }
     }
 }
 
@@ -450,27 +481,41 @@ impl Component for CanvasComponent {
             state.canvas_hover = ctx
                 .bounding_box
                 .coord_absolute_to_relative(mouse_input.coord());
-            match mouse_input {
-                MouseInput::MousePress {
-                    button: MouseButton::Left,
-                    coord,
-                } => {
-                    if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                        state.canvas_mouse_down_coord = Some(coord);
-                        state.pencil_coord(coord);
+            match state.current_tool() {
+                Tool::Pencil => match mouse_input {
+                    MouseInput::MousePress {
+                        button: MouseButton::Left,
+                        coord,
+                    } => {
+                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                            state.canvas_mouse_down_coord = Some(coord);
+                            state.pencil_coord(coord);
+                        }
                     }
-                }
-                MouseInput::MouseMove {
-                    button: Some(MouseButton::Left),
-                    coord,
-                } => {
-                    if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                        state.pencil_coord(coord);
+                    MouseInput::MouseMove {
+                        button: Some(MouseButton::Left),
+                        coord,
+                    } => {
+                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                            state.pencil_coord(coord);
+                        }
                     }
-                }
-                MouseInput::MouseRelease { .. } => state.canvas_mouse_down_coord = None,
+                    MouseInput::MouseRelease { .. } => state.canvas_mouse_down_coord = None,
+                    _ => (),
+                },
+                Tool::Fill => match mouse_input {
+                    MouseInput::MousePress {
+                        button: MouseButton::Left,
+                        coord,
+                    } => {
+                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                            state.flood_fill(coord);
+                        }
+                    }
+                    _ => (),
+                },
 
-                _ => (),
+                other_tool => eprintln!("{} is unimplemented", other_tool),
             }
         }
     }
