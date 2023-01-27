@@ -2,22 +2,36 @@ use crate::palette::Palette;
 use gridbugs::{
     chargrid::{self, border::Border, control_flow::*, prelude::*, text},
     grid_2d::Grid,
+    rgb_int::Rgb24,
 };
 use std::{fmt, path::PathBuf};
 
-#[derive(Default)]
-struct PaletteState {
-    ch_index: usize,
-    fg_index: usize,
-    bg_index: usize,
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum PaletteIndex {
+    #[default]
+    None,
+    Index(usize),
+}
+
+impl PaletteIndex {
+    fn option(self) -> Option<usize> {
+        match self {
+            Self::None => None,
+            Self::Index(i) => Some(i),
+        }
+    }
 }
 
 #[derive(Default)]
-struct PaletteHover {
-    ch_index: Option<usize>,
-    fg_index: Option<usize>,
-    bg_index: Option<usize>,
+struct PerPalette<T> {
+    ch: T,
+    fg: T,
+    bg: T,
 }
+
+type PaletteIndices = PerPalette<PaletteIndex>;
+
+type PaletteHover = PerPalette<Option<PaletteIndex>>;
 
 enum Tool {
     Pencil,
@@ -55,7 +69,7 @@ impl CanvasState {
     fn new(size: Size) -> Self {
         let cell = RenderCell {
             character: None,
-            style: Style::plain_text(),
+            style: Style::default(),
         };
         Self {
             raster: Grid::new_clone(size, cell),
@@ -64,14 +78,18 @@ impl CanvasState {
 
     fn pencil_coord(&mut self, coord: Coord, cell: RenderCell) {
         if let Some(raster_cell) = self.raster.get_mut(coord) {
-            *raster_cell = cell;
+            raster_cell.character = cell.character.or(raster_cell.character);
+            raster_cell.style.background = cell.style.background.or(raster_cell.style.background);
+            raster_cell.style.foreground = cell.style.foreground.or(raster_cell.style.foreground);
+            raster_cell.style.bold = cell.style.bold.or(raster_cell.style.bold);
+            raster_cell.style.underline = cell.style.bold.or(raster_cell.style.underline);
         }
     }
 }
 
 struct AppState {
     palette: Palette,
-    palette_state: PaletteState,
+    palette_indices: PaletteIndices,
     palette_hover: PaletteHover,
     tools: Vec<Tool>,
     tool_index: usize,
@@ -84,7 +102,7 @@ impl AppState {
     fn new_with_palette(palette: Palette) -> Self {
         Self {
             palette,
-            palette_state: Default::default(),
+            palette_indices: Default::default(),
             palette_hover: Default::default(),
             tools: Tool::all(),
             tool_index: 0,
@@ -94,12 +112,30 @@ impl AppState {
         }
     }
 
+    fn get_ch(&self) -> Option<char> {
+        self.palette_indices.ch.option().map(|i| self.palette.ch[i])
+    }
+
+    fn get_fg(&self) -> Option<Rgba32> {
+        self.palette_indices
+            .fg
+            .option()
+            .map(|i| self.palette.fg[i].to_rgba32(255))
+    }
+
+    fn get_bg(&self) -> Option<Rgba32> {
+        self.palette_indices
+            .bg
+            .option()
+            .map(|i| self.palette.bg[i].to_rgba32(255))
+    }
+
     fn current_render_cell(&self) -> RenderCell {
         RenderCell {
-            character: Some(self.palette.ch[self.palette_state.ch_index]),
+            character: self.get_ch(),
             style: Style::default()
-                .with_foreground(self.palette.fg[self.palette_state.fg_index].to_rgba32(255))
-                .with_background(self.palette.bg[self.palette_state.bg_index].to_rgba32(255)),
+                .with_foreground_option(self.get_fg())
+                .with_background_option(self.get_bg()),
         }
     }
 
@@ -109,23 +145,104 @@ impl AppState {
     }
 }
 
-struct PaletteComponent;
+struct PaletteComponent {
+    ch_label: text::StyledString,
+    fg_label: text::StyledString,
+    bg_label: text::StyledString,
+}
+
+impl PaletteComponent {
+    fn new() -> Self {
+        Self {
+            ch_label: text::StyledString::plain_text("ch|".to_string()),
+            fg_label: text::StyledString::plain_text("fg|".to_string()),
+            bg_label: text::StyledString::plain_text("bg|".to_string()),
+        }
+    }
+    fn palette_x_offset(&self) -> i32 {
+        self.ch_label.string.len() as i32
+    }
+    fn preview_offset(&self) -> i32 {
+        2
+    }
+}
 
 impl Component for PaletteComponent {
     type Output = ();
     type State = AppState;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        text::StyledString::plain_text("ch: ".to_string()).render(&(), ctx, fb);
-        text::StyledString::plain_text("fg: ".to_string()).render(&(), ctx.add_y(1), fb);
-        text::StyledString::plain_text("bg: ".to_string()).render(&(), ctx.add_y(2), fb);
-        let ctx = ctx.add_x(4);
-        for (i, &ch) in state.palette.ch.iter().enumerate() {
-            let style = if i == state.palette_state.ch_index {
+        {
+            fb.set_cell_relative_to_ctx(ctx, Coord::new(0, 1), 0, state.current_render_cell());
+        }
+        let ctx = ctx.add_x(self.preview_offset());
+        self.ch_label.render(&(), ctx, fb);
+        self.fg_label.render(&(), ctx.add_y(1), fb);
+        self.bg_label.render(&(), ctx.add_y(2), fb);
+        let ctx = ctx.add_x(self.palette_x_offset());
+        let hover_style = Style::plain_text().with_background(Rgba32::new_grey(127));
+        let select_style = Style::plain_text()
+            .with_foreground(Rgba32::new_grey(0))
+            .with_background(Rgba32::new_grey(255));
+        {
+            let style = if state.palette_indices.ch == PaletteIndex::None {
+                select_style
+            } else if state.palette_hover.ch == Some(PaletteIndex::None) {
+                hover_style
+            } else {
                 Style::plain_text()
-                    .with_foreground(Rgba32::new_grey(0))
-                    .with_background(Rgba32::new_grey(255))
-            } else if Some(i) == state.palette_hover.ch_index {
-                Style::plain_text().with_background(Rgba32::new_grey(127))
+            };
+            fb.set_cell_relative_to_ctx(
+                ctx,
+                Coord::new(0, 0),
+                0,
+                RenderCell {
+                    character: Some('x'),
+                    style,
+                },
+            );
+        }
+        {
+            let style = if state.palette_indices.fg == PaletteIndex::None {
+                select_style
+            } else if state.palette_hover.fg == Some(PaletteIndex::None) {
+                hover_style
+            } else {
+                Style::plain_text()
+            };
+            fb.set_cell_relative_to_ctx(
+                ctx,
+                Coord::new(0, 1),
+                0,
+                RenderCell {
+                    character: Some('x'),
+                    style,
+                },
+            );
+        }
+        {
+            let style = if state.palette_indices.bg == PaletteIndex::None {
+                select_style
+            } else if state.palette_hover.bg == Some(PaletteIndex::None) {
+                hover_style
+            } else {
+                Style::plain_text()
+            };
+            fb.set_cell_relative_to_ctx(
+                ctx,
+                Coord::new(0, 2),
+                0,
+                RenderCell {
+                    character: Some('x'),
+                    style,
+                },
+            );
+        }
+        let ctx = ctx.add_x(1);
+        for (i, &ch) in state.palette.ch.iter().enumerate() {
+            let style = if PaletteIndex::Index(i) == state.palette_indices.ch {
+                select_style
+            } else if Some(PaletteIndex::Index(i)) == state.palette_hover.ch {
+                hover_style
             } else {
                 Style::plain_text()
             };
@@ -139,14 +256,13 @@ impl Component for PaletteComponent {
                 },
             );
         }
-        use gridbugs::rgb_int::Rgb24;
         fn black_foreground(Rgb24 { r, g, b }: Rgb24) -> bool {
             r as u16 + g as u16 + b as u16 > 320
         }
         for (i, &fg) in state.palette.fg.iter().enumerate() {
-            let character = if i == state.palette_state.fg_index {
+            let character = if PaletteIndex::Index(i) == state.palette_indices.fg {
                 Some('*')
-            } else if Some(i) == state.palette_hover.fg_index {
+            } else if Some(PaletteIndex::Index(i)) == state.palette_hover.fg {
                 Some('+')
             } else {
                 None
@@ -169,9 +285,9 @@ impl Component for PaletteComponent {
             );
         }
         for (i, &bg) in state.palette.bg.iter().enumerate() {
-            let character = if i == state.palette_state.bg_index {
+            let character = if PaletteIndex::Index(i) == state.palette_indices.bg {
                 Some('*')
-            } else if Some(i) == state.palette_hover.bg_index {
+            } else if Some(PaletteIndex::Index(i)) == state.palette_hover.bg {
                 Some('+')
             } else {
                 None
@@ -197,45 +313,50 @@ impl Component for PaletteComponent {
     fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
         if let Some(mouse_input) = event.mouse_input() {
             use input::MouseButton;
+            let ctx = ctx.add_x(self.preview_offset());
+            let ctx = ctx.add_x(self.palette_x_offset());
             let ch_bb = ctx
                 .bounding_box
-                .add_offset(Coord::new(4, 0))
                 .set_height(1)
                 .set_width(state.palette.ch.len() as u32);
             let fg_bb = ctx
                 .bounding_box
-                .add_offset(Coord::new(4, 1))
+                .add_y(1)
                 .set_height(1)
                 .set_width(state.palette.fg.len() as u32);
             let bg_bb = ctx
                 .bounding_box
-                .add_offset(Coord::new(4, 2))
+                .add_y(2)
                 .set_height(1)
                 .set_width(state.palette.bg.len() as u32);
+            fn coord_to_index(c: Coord) -> PaletteIndex {
+                if c.x == 0 {
+                    PaletteIndex::None
+                } else {
+                    PaletteIndex::Index(c.x as usize - 1)
+                }
+            }
             match mouse_input {
                 MouseInput::MouseMove { coord, .. } => {
-                    state.palette_hover.ch_index = ch_bb
-                        .coord_absolute_to_relative(coord)
-                        .map(|c| c.x as usize);
-                    state.palette_hover.fg_index = fg_bb
-                        .coord_absolute_to_relative(coord)
-                        .map(|c| c.x as usize);
-                    state.palette_hover.bg_index = bg_bb
-                        .coord_absolute_to_relative(coord)
-                        .map(|c| c.x as usize);
+                    state.palette_hover.ch =
+                        ch_bb.coord_absolute_to_relative(coord).map(coord_to_index);
+                    state.palette_hover.fg =
+                        fg_bb.coord_absolute_to_relative(coord).map(coord_to_index);
+                    state.palette_hover.bg =
+                        bg_bb.coord_absolute_to_relative(coord).map(coord_to_index);
                 }
                 MouseInput::MousePress {
                     button: MouseButton::Left,
                     coord,
                 } => {
                     if let Some(coord) = ch_bb.coord_absolute_to_relative(coord) {
-                        state.palette_state.ch_index = coord.x as usize;
+                        state.palette_indices.ch = coord_to_index(coord);
                     }
                     if let Some(coord) = fg_bb.coord_absolute_to_relative(coord) {
-                        state.palette_state.fg_index = coord.x as usize;
+                        state.palette_indices.fg = coord_to_index(coord);
                     }
                     if let Some(coord) = bg_bb.coord_absolute_to_relative(coord) {
-                        state.palette_state.bg_index = coord.x as usize;
+                        state.palette_indices.bg = coord_to_index(coord);
                     }
                 }
                 _ => (),
@@ -355,7 +476,7 @@ impl GuiComponent {
     }
 
     fn new() -> Self {
-        let palette = Self::border(PaletteComponent, "Palette");
+        let palette = Self::border(PaletteComponent::new(), "Palette");
         let tools = Self::border(ToolsComponent, "Tools");
         let canvas = Self::border(CanvasComponent, "Canvas");
         Self {
