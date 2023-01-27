@@ -57,8 +57,9 @@ mod palette_toml {
         let str = toml
             .as_str()
             .ok_or_else(|| format!("expected string, got {:?}", toml))?;
-        if str.len() == 1 {
-            Ok(str.chars().next().unwrap())
+        let chars = str.chars().collect::<Vec<_>>();
+        if chars.len() == 1 {
+            Ok(chars[0])
         } else {
             Err(format!("expected string of length 1, got {}", str))
         }

@@ -39,6 +39,7 @@ enum Tool {
     Fill,
     Erase,
     Eyedrop,
+    Text,
 }
 
 impl fmt::Display for Tool {
@@ -49,6 +50,7 @@ impl fmt::Display for Tool {
             Self::Fill => "Fill",
             Self::Erase => "Erase",
             Self::Eyedrop => "Eyedrop",
+            Self::Text => "Text",
         };
         write!(f, "{}", s)
     }
@@ -57,7 +59,7 @@ impl fmt::Display for Tool {
 impl Tool {
     fn all() -> Vec<Self> {
         use Tool::*;
-        vec![Pencil, Line, Fill, Erase, Eyedrop]
+        vec![Pencil, Fill, Line, Erase, Eyedrop, Text]
     }
 }
 
@@ -93,6 +95,7 @@ struct AppState {
     palette_hover: PaletteHover,
     tools: Vec<Tool>,
     tool_index: usize,
+    tool_hover: Option<usize>,
     canvas_state: CanvasState,
     canvas_mouse_down_coord: Option<Coord>,
     canvas_hover: Option<Coord>,
@@ -106,6 +109,7 @@ impl AppState {
             palette_hover: Default::default(),
             tools: Tool::all(),
             tool_index: 0,
+            tool_hover: None,
             canvas_state: CanvasState::new(Size::new(45, 30)),
             canvas_mouse_down_coord: None,
             canvas_hover: None,
@@ -378,14 +382,47 @@ impl Component for ToolsComponent {
             let ctx = ctx.add_y(i as i32);
             if i == state.tool_index {
                 text::StyledString::plain_text(format!("*{}*", tool)).render(&(), ctx, fb);
+            } else if Some(i) == state.tool_hover {
+                let asterisk = text::StyledString {
+                    string: "*".to_string(),
+                    style: Style::plain_text().with_foreground(Rgba32::new_grey(127)),
+                };
+
+                text::Text::new(vec![
+                    asterisk.clone(),
+                    text::StyledString::plain_text(format!("{}", tool)),
+                    asterisk,
+                ])
+                .render(&(), ctx, fb);
             } else {
                 text::StyledString::plain_text(format!(" {}", tool)).render(&(), ctx, fb);
             }
         }
     }
-    fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, _event: Event) -> Self::Output {}
-    fn size(&self, _state: &Self::State, _ctx: Ctx) -> Size {
-        Size::new(10, 5)
+    fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
+        if let Some(mouse_input) = event.mouse_input() {
+            use input::MouseButton;
+            match mouse_input {
+                MouseInput::MouseMove { coord, .. } => {
+                    state.tool_hover = ctx
+                        .bounding_box
+                        .coord_absolute_to_relative(coord)
+                        .map(|c| c.y as usize);
+                }
+                MouseInput::MousePress {
+                    button: MouseButton::Left,
+                    coord,
+                } => {
+                    if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                        state.tool_index = coord.y as usize;
+                    }
+                }
+                _ => (),
+            }
+        }
+    }
+    fn size(&self, state: &Self::State, _ctx: Ctx) -> Size {
+        Size::new(10, state.tools.len() as u32)
     }
 }
 
