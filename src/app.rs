@@ -65,8 +65,13 @@ impl Tool {
     }
 }
 
+enum CanvasPreview {
+    Line { start: Coord, end: Coord },
+}
+
 struct CanvasState {
     raster: Grid<RenderCell>,
+    preview: Option<CanvasPreview>,
 }
 
 impl CanvasState {
@@ -77,6 +82,7 @@ impl CanvasState {
         };
         Self {
             raster: Grid::new_clone(size, cell),
+            preview: None,
         }
     }
 
@@ -475,6 +481,16 @@ impl Component for CanvasComponent {
             }
             fb.set_cell_relative_to_ctx(ctx, coord, 0, cell);
         }
+        if let Some(preview) = state.canvas_state.preview.as_ref() {
+            match preview {
+                CanvasPreview::Line { start, end } => {
+                    let cell = state.current_render_cell();
+                    for coord in line_2d::coords_between(*start, *end) {
+                        fb.set_cell_relative_to_ctx(ctx, coord, 1, cell);
+                    }
+                }
+            }
+        }
     }
     fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
         if let Some(mouse_input) = event.mouse_input() {
@@ -522,7 +538,41 @@ impl Component for CanvasComponent {
                     }
                     _ => (),
                 },
-
+                Tool::Line => match mouse_input {
+                    MouseInput::MousePress {
+                        button: MouseButton::Left,
+                        coord,
+                    } => {
+                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                            state.canvas_mouse_down_coord = Some(coord);
+                        }
+                    }
+                    MouseInput::MouseMove {
+                        button: Some(MouseButton::Left),
+                        coord,
+                    } => {
+                        if let Some(end) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                            if let Some(start) = state.canvas_mouse_down_coord {
+                                state.canvas_state.preview =
+                                    Some(CanvasPreview::Line { start, end });
+                            }
+                        }
+                    }
+                    MouseInput::MouseRelease { coord, .. } => {
+                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                            if let Some(prev_coord) = state.canvas_mouse_down_coord {
+                                for coord in line_2d::coords_between(prev_coord, coord) {
+                                    state.pencil_coord(coord);
+                                }
+                            } else {
+                                state.pencil_coord(coord);
+                            }
+                            state.canvas_mouse_down_coord = Some(coord);
+                        }
+                        state.canvas_mouse_down_coord = None;
+                    }
+                    _ => (),
+                },
                 other_tool => eprintln!("{} is unimplemented", other_tool),
             }
         }
