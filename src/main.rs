@@ -36,7 +36,7 @@ fn wgpu_context() -> chargrid_wgpu::Context {
         title: "Text Paint".to_string(),
         window_dimensions_px: Dimensions {
             width: 1280.,
-            height: 960.,
+            height: 840.,
         },
         cell_dimensions_px: Dimensions {
             width: CELL_SIZE_PX,
