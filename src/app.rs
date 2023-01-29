@@ -639,4 +639,5 @@ pub fn app(palette_path: PathBuf) -> App {
             Ok(output) => output,
         })
         .clear_each_frame()
+        .exit_on_close()
 }
