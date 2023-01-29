@@ -81,7 +81,7 @@ struct LineEvent {
     end: Coord,
 }
 
-enum CanvasEvent {
+enum DrawingEvent {
     Pencil(PencilEvent),
     FloodFill(FloodFillEvent),
     Line(LineEvent),
@@ -137,9 +137,9 @@ impl Raster {
         seen
     }
 
-    fn commit_event(&mut self, event: &CanvasEvent) {
+    fn commit_event(&mut self, event: &DrawingEvent) {
         match event {
-            CanvasEvent::Pencil(PencilEvent {
+            DrawingEvent::Pencil(PencilEvent {
                 render_cell,
                 coords,
             }) => {
@@ -147,12 +147,12 @@ impl Raster {
                     self.set_coord(coord, *render_cell);
                 }
             }
-            CanvasEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
+            DrawingEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
                 for coord in self.flood_fill(*start) {
                     self.set_coord(coord, *render_cell);
                 }
             }
-            CanvasEvent::Line(LineEvent {
+            DrawingEvent::Line(LineEvent {
                 render_cell,
                 start,
                 end,
@@ -167,7 +167,8 @@ impl Raster {
 
 struct UndoBuffer {
     initial: Raster,
-    events: Vec<CanvasEvent>,
+    events: Vec<DrawingEvent>,
+    redo_buffer: Vec<DrawingEvent>,
 }
 
 impl UndoBuffer {
@@ -175,16 +176,35 @@ impl UndoBuffer {
         Self {
             initial,
             events: Vec::new(),
+            redo_buffer: Vec::new(),
         }
     }
 
     fn undo(&mut self) -> Raster {
-        self.events.pop();
         let mut raster = self.initial.clone();
+        if let Some(event) = self.events.pop() {
+            self.redo_buffer.push(event);
+            for event in &self.events {
+                raster.commit_event(event);
+            }
+        }
+        raster
+    }
+
+    fn redo(&mut self) -> Raster {
+        let mut raster = self.initial.clone();
+        if let Some(event) = self.redo_buffer.pop() {
+            self.events.push(event);
+        }
         for event in &self.events {
             raster.commit_event(event);
         }
         raster
+    }
+
+    fn commit_event(&mut self, event: DrawingEvent) {
+        self.events.push(event);
+        self.redo_buffer.clear();
     }
 }
 
@@ -198,7 +218,7 @@ struct AppState {
     canvas_state: Raster,
     canvas_mouse_down_coord: Option<Coord>,
     canvas_hover: Option<Coord>,
-    current_event: Option<CanvasEvent>,
+    current_event: Option<DrawingEvent>,
     undo_buffer: UndoBuffer,
 }
 
@@ -255,12 +275,16 @@ impl AppState {
     fn commit_current_event(&mut self) {
         if let Some(event) = self.current_event.take() {
             self.canvas_state.commit_event(&event);
-            self.undo_buffer.events.push(event);
+            self.undo_buffer.commit_event(event);
         }
     }
 
     fn undo(&mut self) {
         self.canvas_state = self.undo_buffer.undo();
+    }
+
+    fn redo(&mut self) {
+        self.canvas_state = self.undo_buffer.redo();
     }
 }
 
@@ -560,7 +584,7 @@ impl Component for CanvasComponent {
         }
         if let Some(current_event) = state.current_event.as_ref() {
             match current_event {
-                CanvasEvent::Pencil(PencilEvent {
+                DrawingEvent::Pencil(PencilEvent {
                     render_cell,
                     coords,
                 }) => {
@@ -568,12 +592,12 @@ impl Component for CanvasComponent {
                         fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
                     }
                 }
-                CanvasEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
+                DrawingEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
                     for coord in state.canvas_state.flood_fill(*start) {
                         fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
                     }
                 }
-                CanvasEvent::Line(LineEvent {
+                DrawingEvent::Line(LineEvent {
                     render_cell,
                     start,
                     end,
@@ -600,7 +624,7 @@ impl Component for CanvasComponent {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
                             let mut coords = HashSet::new();
                             coords.insert(coord);
-                            state.current_event = Some(CanvasEvent::Pencil(PencilEvent {
+                            state.current_event = Some(DrawingEvent::Pencil(PencilEvent {
                                 render_cell: state.current_render_cell(),
                                 coords,
                             }));
@@ -611,7 +635,7 @@ impl Component for CanvasComponent {
                         button: Some(MouseButton::Left),
                         coord,
                     } => {
-                        if let Some(CanvasEvent::Pencil(PencilEvent { coords, .. })) =
+                        if let Some(DrawingEvent::Pencil(PencilEvent { coords, .. })) =
                             state.current_event.as_mut()
                         {
                             if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
@@ -639,7 +663,7 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            state.current_event = Some(CanvasEvent::FloodFill(FloodFillEvent {
+                            state.current_event = Some(DrawingEvent::FloodFill(FloodFillEvent {
                                 render_cell: state.current_render_cell(),
                                 start: coord,
                             }));
@@ -649,7 +673,7 @@ impl Component for CanvasComponent {
                         button: Some(MouseButton::Left),
                         coord,
                     } => {
-                        if let Some(CanvasEvent::FloodFill(FloodFillEvent { start, .. })) =
+                        if let Some(DrawingEvent::FloodFill(FloodFillEvent { start, .. })) =
                             state.current_event.as_mut()
                         {
                             if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
@@ -678,7 +702,7 @@ impl Component for CanvasComponent {
                     } => {
                         if let Some(end) = ctx.bounding_box.coord_absolute_to_relative(coord) {
                             if let Some(start) = state.canvas_mouse_down_coord {
-                                state.current_event = Some(CanvasEvent::Line(LineEvent {
+                                state.current_event = Some(DrawingEvent::Line(LineEvent {
                                     start,
                                     end,
                                     render_cell: state.current_render_cell(),
@@ -792,6 +816,7 @@ impl Component for GuiComponent {
         } else if let Some(keyboard_input) = event.keyboard_input() {
             match keyboard_input {
                 KeyboardInput::Char('u') => state.undo(),
+                KeyboardInput::Char('r') => state.redo(),
                 _ => (),
             }
         }
