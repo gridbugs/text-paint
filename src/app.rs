@@ -5,7 +5,7 @@ use gridbugs::{
     line_2d,
     rgb_int::Rgb24,
 };
-use std::{fmt, path::PathBuf};
+use std::{collections::HashSet, fmt, path::PathBuf};
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum PaletteIndex {
@@ -65,10 +65,29 @@ impl Tool {
     }
 }
 
-enum CanvasPreview {
-    Line { start: Coord, end: Coord },
+struct PencilEvent {
+    render_cell: RenderCell,
+    coords: HashSet<Coord>,
 }
 
+struct FloodFillEvent {
+    render_cell: RenderCell,
+    start: Coord,
+}
+
+struct LineEvent {
+    render_cell: RenderCell,
+    start: Coord,
+    end: Coord,
+}
+
+enum CanvasEvent {
+    Pencil(PencilEvent),
+    FloodFill(FloodFillEvent),
+    Line(LineEvent),
+}
+
+#[derive(Clone)]
 struct Raster {
     grid: Grid<RenderCell>,
 }
@@ -84,7 +103,7 @@ impl Raster {
         }
     }
 
-    fn pencil_coord(&mut self, coord: Coord, cell: RenderCell) {
+    fn set_coord(&mut self, coord: Coord, cell: RenderCell) {
         if let Some(raster_cell) = self.grid.get_mut(coord) {
             raster_cell.character = cell.character.or(raster_cell.character);
             raster_cell.style.background = cell.style.background.or(raster_cell.style.background);
@@ -93,11 +112,76 @@ impl Raster {
             raster_cell.style.underline = cell.style.bold.or(raster_cell.style.underline);
         }
     }
+
+    fn flood_fill(&self, coord: Coord) -> HashSet<Coord> {
+        use gridbugs::direction::CardinalDirection;
+        use std::collections::VecDeque;
+        let mut queue = VecDeque::new();
+        let mut seen = HashSet::new();
+        let initial_cell = self.grid.get_checked(coord);
+        queue.push_front(coord);
+        seen.insert(coord);
+        while let Some(coord) = queue.pop_back() {
+            for d in CardinalDirection::all() {
+                let nei_coord = coord + d.coord();
+                if !seen.contains(&nei_coord) {
+                    if let Some(nei_cell) = self.grid.get(nei_coord) {
+                        if nei_cell == initial_cell {
+                            seen.insert(nei_coord);
+                            queue.push_front(nei_coord);
+                        }
+                    }
+                }
+            }
+        }
+        seen
+    }
+
+    fn commit_event(&mut self, event: &CanvasEvent) {
+        match event {
+            CanvasEvent::Pencil(PencilEvent {
+                render_cell,
+                coords,
+            }) => {
+                for &coord in coords.iter() {
+                    self.set_coord(coord, *render_cell);
+                }
+            }
+            CanvasEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
+                for coord in self.flood_fill(*start) {
+                    self.set_coord(coord, *render_cell);
+                }
+            }
+            CanvasEvent::Line(LineEvent {
+                render_cell,
+                start,
+                end,
+            }) => {
+                for coord in line_2d::coords_between(*start, *end) {
+                    self.set_coord(coord, *render_cell);
+                }
+            }
+        }
+    }
+}
+
+struct UndoBuffer {
+    initial: Raster,
+    events: Vec<CanvasEvent>,
+}
+
+impl UndoBuffer {
+    fn new(initial: Raster) -> Self {
+        Self {
+            initial,
+            events: Vec::new(),
+        }
+    }
 }
 
 struct CanvasState {
     raster: Raster,
-    preview: Option<CanvasPreview>,
+    preview: Option<CanvasEvent>,
 }
 
 impl CanvasState {
@@ -119,10 +203,13 @@ struct AppState {
     canvas_state: CanvasState,
     canvas_mouse_down_coord: Option<Coord>,
     canvas_hover: Option<Coord>,
+    undo_buffer: UndoBuffer,
 }
 
 impl AppState {
     fn new_with_palette(palette: Palette) -> Self {
+        let canvas_state = CanvasState::new(Size::new(100, 80));
+        let undo_buffer = UndoBuffer::new(canvas_state.raster.clone());
         Self {
             palette,
             palette_indices: Default::default(),
@@ -130,9 +217,10 @@ impl AppState {
             tools: Tool::all(),
             tool_index: 0,
             tool_hover: None,
-            canvas_state: CanvasState::new(Size::new(100, 80)),
+            canvas_state,
             canvas_mouse_down_coord: None,
             canvas_hover: None,
+            undo_buffer,
         }
     }
 
@@ -163,40 +251,8 @@ impl AppState {
         }
     }
 
-    fn pencil_coord(&mut self, coord: Coord) {
-        self.canvas_state
-            .raster
-            .pencil_coord(coord, self.current_render_cell());
-    }
-
     fn current_tool(&self) -> Tool {
         self.tools[self.tool_index]
-    }
-
-    fn flood_fill(&mut self, coord: Coord) {
-        use gridbugs::direction::CardinalDirection;
-        use std::collections::{HashSet, VecDeque};
-        let mut queue = VecDeque::new();
-        let mut seen = HashSet::new();
-        let initial_cell = self.canvas_state.raster.grid.get_checked(coord);
-        queue.push_front(coord);
-        seen.insert(coord);
-        while let Some(coord) = queue.pop_back() {
-            for d in CardinalDirection::all() {
-                let nei_coord = coord + d.coord();
-                if !seen.contains(&nei_coord) {
-                    if let Some(nei_cell) = self.canvas_state.raster.grid.get(nei_coord) {
-                        if nei_cell == initial_cell {
-                            seen.insert(nei_coord);
-                            queue.push_front(nei_coord);
-                        }
-                    }
-                }
-            }
-        }
-        for coord in seen {
-            self.pencil_coord(coord);
-        }
     }
 }
 
@@ -496,10 +552,26 @@ impl Component for CanvasComponent {
         }
         if let Some(preview) = state.canvas_state.preview.as_ref() {
             match preview {
-                CanvasPreview::Line { start, end } => {
-                    let cell = state.current_render_cell();
+                CanvasEvent::Pencil(PencilEvent {
+                    render_cell,
+                    coords,
+                }) => {
+                    for &coord in coords.iter() {
+                        fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
+                    }
+                }
+                CanvasEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
+                    for coord in state.canvas_state.raster.flood_fill(*start) {
+                        fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
+                    }
+                }
+                CanvasEvent::Line(LineEvent {
+                    render_cell,
+                    start,
+                    end,
+                }) => {
                     for coord in line_2d::coords_between(*start, *end) {
-                        fb.set_cell_relative_to_ctx(ctx, coord, 1, cell);
+                        fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
                     }
                 }
             }
@@ -518,26 +590,41 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
+                            let mut coords = HashSet::new();
+                            coords.insert(coord);
+                            state.canvas_state.preview = Some(CanvasEvent::Pencil(PencilEvent {
+                                render_cell: state.current_render_cell(),
+                                coords,
+                            }));
                             state.canvas_mouse_down_coord = Some(coord);
-                            state.pencil_coord(coord);
                         }
                     }
                     MouseInput::MouseMove {
                         button: Some(MouseButton::Left),
                         coord,
                     } => {
-                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            if let Some(prev_coord) = state.canvas_mouse_down_coord {
-                                for coord in line_2d::coords_between(prev_coord, coord) {
-                                    state.pencil_coord(coord);
+                        if let Some(CanvasEvent::Pencil(PencilEvent { coords, .. })) =
+                            state.canvas_state.preview.as_mut()
+                        {
+                            if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
+                            {
+                                if let Some(prev_coord) = state.canvas_mouse_down_coord {
+                                    for coord in line_2d::coords_between(prev_coord, coord) {
+                                        coords.insert(coord);
+                                    }
+                                } else {
+                                    coords.insert(coord);
                                 }
-                            } else {
-                                state.pencil_coord(coord);
+                                state.canvas_mouse_down_coord = Some(coord);
                             }
-                            state.canvas_mouse_down_coord = Some(coord);
                         }
                     }
-                    MouseInput::MouseRelease { .. } => state.canvas_mouse_down_coord = None,
+                    MouseInput::MouseRelease { .. } => {
+                        if let Some(event) = state.canvas_state.preview.take() {
+                            state.canvas_state.raster.commit_event(&event);
+                        }
+                        state.canvas_mouse_down_coord = None;
+                    }
                     _ => (),
                 },
                 Tool::Fill => match mouse_input {
@@ -546,7 +633,29 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            state.flood_fill(coord);
+                            state.canvas_state.preview =
+                                Some(CanvasEvent::FloodFill(FloodFillEvent {
+                                    render_cell: state.current_render_cell(),
+                                    start: coord,
+                                }));
+                        }
+                    }
+                    MouseInput::MouseMove {
+                        button: Some(MouseButton::Left),
+                        coord,
+                    } => {
+                        if let Some(CanvasEvent::FloodFill(FloodFillEvent { start, .. })) =
+                            state.canvas_state.preview.as_mut()
+                        {
+                            if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
+                            {
+                                *start = coord;
+                            }
+                        }
+                    }
+                    MouseInput::MouseRelease { .. } => {
+                        if let Some(event) = state.canvas_state.preview.take() {
+                            state.canvas_state.raster.commit_event(&event);
                         }
                     }
                     _ => (),
@@ -566,21 +675,17 @@ impl Component for CanvasComponent {
                     } => {
                         if let Some(end) = ctx.bounding_box.coord_absolute_to_relative(coord) {
                             if let Some(start) = state.canvas_mouse_down_coord {
-                                state.canvas_state.preview =
-                                    Some(CanvasPreview::Line { start, end });
+                                state.canvas_state.preview = Some(CanvasEvent::Line(LineEvent {
+                                    start,
+                                    end,
+                                    render_cell: state.current_render_cell(),
+                                }));
                             }
                         }
                     }
-                    MouseInput::MouseRelease { coord, .. } => {
-                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            if let Some(prev_coord) = state.canvas_mouse_down_coord {
-                                for coord in line_2d::coords_between(prev_coord, coord) {
-                                    state.pencil_coord(coord);
-                                }
-                            } else {
-                                state.pencil_coord(coord);
-                            }
-                            state.canvas_mouse_down_coord = Some(coord);
+                    MouseInput::MouseRelease { .. } => {
+                        if let Some(event) = state.canvas_state.preview.take() {
+                            state.canvas_state.raster.commit_event(&event);
                         }
                         state.canvas_mouse_down_coord = None;
                     }
