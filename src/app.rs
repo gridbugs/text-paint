@@ -69,30 +69,42 @@ enum CanvasPreview {
     Line { start: Coord, end: Coord },
 }
 
-struct CanvasState {
-    raster: Grid<RenderCell>,
-    preview: Option<CanvasPreview>,
+struct Raster {
+    grid: Grid<RenderCell>,
 }
 
-impl CanvasState {
+impl Raster {
     fn new(size: Size) -> Self {
         let cell = RenderCell {
             character: None,
             style: Style::default(),
         };
         Self {
-            raster: Grid::new_clone(size, cell),
-            preview: None,
+            grid: Grid::new_clone(size, cell),
         }
     }
 
     fn pencil_coord(&mut self, coord: Coord, cell: RenderCell) {
-        if let Some(raster_cell) = self.raster.get_mut(coord) {
+        if let Some(raster_cell) = self.grid.get_mut(coord) {
             raster_cell.character = cell.character.or(raster_cell.character);
             raster_cell.style.background = cell.style.background.or(raster_cell.style.background);
             raster_cell.style.foreground = cell.style.foreground.or(raster_cell.style.foreground);
             raster_cell.style.bold = cell.style.bold.or(raster_cell.style.bold);
             raster_cell.style.underline = cell.style.bold.or(raster_cell.style.underline);
+        }
+    }
+}
+
+struct CanvasState {
+    raster: Raster,
+    preview: Option<CanvasPreview>,
+}
+
+impl CanvasState {
+    fn new(size: Size) -> Self {
+        Self {
+            raster: Raster::new(size),
+            preview: None,
         }
     }
 }
@@ -153,6 +165,7 @@ impl AppState {
 
     fn pencil_coord(&mut self, coord: Coord) {
         self.canvas_state
+            .raster
             .pencil_coord(coord, self.current_render_cell());
     }
 
@@ -165,14 +178,14 @@ impl AppState {
         use std::collections::{HashSet, VecDeque};
         let mut queue = VecDeque::new();
         let mut seen = HashSet::new();
-        let initial_cell = self.canvas_state.raster.get_checked(coord);
+        let initial_cell = self.canvas_state.raster.grid.get_checked(coord);
         queue.push_front(coord);
         seen.insert(coord);
         while let Some(coord) = queue.pop_back() {
             for d in CardinalDirection::all() {
                 let nei_coord = coord + d.coord();
                 if !seen.contains(&nei_coord) {
-                    if let Some(nei_cell) = self.canvas_state.raster.get(nei_coord) {
+                    if let Some(nei_cell) = self.canvas_state.raster.grid.get(nei_coord) {
                         if nei_cell == initial_cell {
                             seen.insert(nei_coord);
                             queue.push_front(nei_coord);
@@ -470,7 +483,7 @@ impl Component for CanvasComponent {
     type Output = ();
     type State = AppState;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        for (coord, &cell) in state.canvas_state.raster.enumerate() {
+        for (coord, &cell) in state.canvas_state.raster.grid.enumerate() {
             let mut cell = cell;
             if Some(coord) == state.canvas_hover {
                 cell.style.background = if let Some(background) = cell.background() {
@@ -581,6 +594,7 @@ impl Component for CanvasComponent {
         state
             .canvas_state
             .raster
+            .grid
             .size()
             .pairwise_min(ctx.bounding_box.size())
     }
