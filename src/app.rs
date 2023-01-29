@@ -177,19 +177,14 @@ impl UndoBuffer {
             events: Vec::new(),
         }
     }
-}
 
-struct CanvasState {
-    raster: Raster,
-    preview: Option<CanvasEvent>,
-}
-
-impl CanvasState {
-    fn new(size: Size) -> Self {
-        Self {
-            raster: Raster::new(size),
-            preview: None,
+    fn undo(&mut self) -> Raster {
+        self.events.pop();
+        let mut raster = self.initial.clone();
+        for event in &self.events {
+            raster.commit_event(event);
         }
+        raster
     }
 }
 
@@ -200,16 +195,17 @@ struct AppState {
     tools: Vec<Tool>,
     tool_index: usize,
     tool_hover: Option<usize>,
-    canvas_state: CanvasState,
+    canvas_state: Raster,
     canvas_mouse_down_coord: Option<Coord>,
     canvas_hover: Option<Coord>,
+    current_event: Option<CanvasEvent>,
     undo_buffer: UndoBuffer,
 }
 
 impl AppState {
     fn new_with_palette(palette: Palette) -> Self {
-        let canvas_state = CanvasState::new(Size::new(100, 80));
-        let undo_buffer = UndoBuffer::new(canvas_state.raster.clone());
+        let canvas_state = Raster::new(Size::new(100, 80));
+        let undo_buffer = UndoBuffer::new(canvas_state.clone());
         Self {
             palette,
             palette_indices: Default::default(),
@@ -220,6 +216,7 @@ impl AppState {
             canvas_state,
             canvas_mouse_down_coord: None,
             canvas_hover: None,
+            current_event: None,
             undo_buffer,
         }
     }
@@ -253,6 +250,17 @@ impl AppState {
 
     fn current_tool(&self) -> Tool {
         self.tools[self.tool_index]
+    }
+
+    fn commit_current_event(&mut self) {
+        if let Some(event) = self.current_event.take() {
+            self.canvas_state.commit_event(&event);
+            self.undo_buffer.events.push(event);
+        }
+    }
+
+    fn undo(&mut self) {
+        self.canvas_state = self.undo_buffer.undo();
     }
 }
 
@@ -539,7 +547,7 @@ impl Component for CanvasComponent {
     type Output = ();
     type State = AppState;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        for (coord, &cell) in state.canvas_state.raster.grid.enumerate() {
+        for (coord, &cell) in state.canvas_state.grid.enumerate() {
             let mut cell = cell;
             if Some(coord) == state.canvas_hover {
                 cell.style.background = if let Some(background) = cell.background() {
@@ -550,8 +558,8 @@ impl Component for CanvasComponent {
             }
             fb.set_cell_relative_to_ctx(ctx, coord, 0, cell);
         }
-        if let Some(preview) = state.canvas_state.preview.as_ref() {
-            match preview {
+        if let Some(current_event) = state.current_event.as_ref() {
+            match current_event {
                 CanvasEvent::Pencil(PencilEvent {
                     render_cell,
                     coords,
@@ -561,7 +569,7 @@ impl Component for CanvasComponent {
                     }
                 }
                 CanvasEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
-                    for coord in state.canvas_state.raster.flood_fill(*start) {
+                    for coord in state.canvas_state.flood_fill(*start) {
                         fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
                     }
                 }
@@ -592,7 +600,7 @@ impl Component for CanvasComponent {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
                             let mut coords = HashSet::new();
                             coords.insert(coord);
-                            state.canvas_state.preview = Some(CanvasEvent::Pencil(PencilEvent {
+                            state.current_event = Some(CanvasEvent::Pencil(PencilEvent {
                                 render_cell: state.current_render_cell(),
                                 coords,
                             }));
@@ -604,7 +612,7 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(CanvasEvent::Pencil(PencilEvent { coords, .. })) =
-                            state.canvas_state.preview.as_mut()
+                            state.current_event.as_mut()
                         {
                             if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
                             {
@@ -620,9 +628,7 @@ impl Component for CanvasComponent {
                         }
                     }
                     MouseInput::MouseRelease { .. } => {
-                        if let Some(event) = state.canvas_state.preview.take() {
-                            state.canvas_state.raster.commit_event(&event);
-                        }
+                        state.commit_current_event();
                         state.canvas_mouse_down_coord = None;
                     }
                     _ => (),
@@ -633,11 +639,10 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            state.canvas_state.preview =
-                                Some(CanvasEvent::FloodFill(FloodFillEvent {
-                                    render_cell: state.current_render_cell(),
-                                    start: coord,
-                                }));
+                            state.current_event = Some(CanvasEvent::FloodFill(FloodFillEvent {
+                                render_cell: state.current_render_cell(),
+                                start: coord,
+                            }));
                         }
                     }
                     MouseInput::MouseMove {
@@ -645,7 +650,7 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(CanvasEvent::FloodFill(FloodFillEvent { start, .. })) =
-                            state.canvas_state.preview.as_mut()
+                            state.current_event.as_mut()
                         {
                             if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
                             {
@@ -654,9 +659,7 @@ impl Component for CanvasComponent {
                         }
                     }
                     MouseInput::MouseRelease { .. } => {
-                        if let Some(event) = state.canvas_state.preview.take() {
-                            state.canvas_state.raster.commit_event(&event);
-                        }
+                        state.commit_current_event();
                     }
                     _ => (),
                 },
@@ -675,7 +678,7 @@ impl Component for CanvasComponent {
                     } => {
                         if let Some(end) = ctx.bounding_box.coord_absolute_to_relative(coord) {
                             if let Some(start) = state.canvas_mouse_down_coord {
-                                state.canvas_state.preview = Some(CanvasEvent::Line(LineEvent {
+                                state.current_event = Some(CanvasEvent::Line(LineEvent {
                                     start,
                                     end,
                                     render_cell: state.current_render_cell(),
@@ -684,9 +687,7 @@ impl Component for CanvasComponent {
                         }
                     }
                     MouseInput::MouseRelease { .. } => {
-                        if let Some(event) = state.canvas_state.preview.take() {
-                            state.canvas_state.raster.commit_event(&event);
-                        }
+                        state.commit_current_event();
                         state.canvas_mouse_down_coord = None;
                     }
                     _ => (),
@@ -698,7 +699,6 @@ impl Component for CanvasComponent {
     fn size(&self, state: &Self::State, ctx: Ctx) -> Size {
         state
             .canvas_state
-            .raster
             .grid
             .size()
             .pairwise_min(ctx.bounding_box.size())
@@ -788,6 +788,11 @@ impl Component for GuiComponent {
             }
             if ctxs.canvas.bounding_box.contains_coord(mouse_input.coord()) {
                 self.canvas.update(state, ctxs.canvas, event)
+            }
+        } else if let Some(keyboard_input) = event.keyboard_input() {
+            match keyboard_input {
+                KeyboardInput::Char('u') => state.undo(),
+                _ => (),
             }
         }
     }
