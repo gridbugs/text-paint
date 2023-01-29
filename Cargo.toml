@@ -18,6 +18,7 @@ features = [
     "rgb_int",
     "grid_2d",
     "direction",
+    "line_2d",
 ]
 
 #[patch.crates-io]

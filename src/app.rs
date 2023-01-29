@@ -2,6 +2,7 @@ use crate::palette::Palette;
 use gridbugs::{
     chargrid::{self, border::Border, control_flow::*, prelude::*, text},
     grid_2d::Grid,
+    line_2d,
     rgb_int::Rgb24,
 };
 use std::{fmt, path::PathBuf};
@@ -497,7 +498,14 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            state.pencil_coord(coord);
+                            if let Some(prev_coord) = state.canvas_mouse_down_coord {
+                                for coord in line_2d::coords_between(prev_coord, coord) {
+                                    state.pencil_coord(coord);
+                                }
+                            } else {
+                                state.pencil_coord(coord);
+                            }
+                            state.canvas_mouse_down_coord = Some(coord);
                         }
                     }
                     MouseInput::MouseRelease { .. } => state.canvas_mouse_down_coord = None,

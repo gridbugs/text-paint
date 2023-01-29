@@ -190,9 +190,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.78"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a20104e2335ce8a659d6dd92a51a767a0c062599c73b343fd152cb401e828c3d"
+checksum = "50d30906286121d95be3d479533b458f87493b30a4b5f79a607db8f5d11aa91f"
 
 [[package]]
 name = "cfg-if"
@@ -869,6 +869,7 @@ dependencies = [
  "chargrid_wgpu",
  "direction",
  "grid_2d",
+ "line_2d",
  "rgb_int",
 ]
 
@@ -970,6 +971,17 @@ checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
 dependencies = [
  "cfg-if",
  "winapi",
+]
+
+[[package]]
+name = "line_2d"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "229378051894cb3fc9815df2f7266c66e1b3bfbfa8cf541b58a6a1f4cd064c96"
+dependencies = [
+ "coord_2d",
+ "direction",
+ "either",
 ]
 
 [[package]]
