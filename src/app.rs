@@ -461,17 +461,17 @@ impl Component for PaletteComponent {
             let ch_bb = ctx
                 .bounding_box
                 .set_height(1)
-                .set_width(state.palette.ch.len() as u32);
+                .set_width(state.palette.ch.len() as u32 + 1);
             let fg_bb = ctx
                 .bounding_box
                 .add_y(1)
                 .set_height(1)
-                .set_width(state.palette.fg.len() as u32);
+                .set_width(state.palette.fg.len() as u32 + 1);
             let bg_bb = ctx
                 .bounding_box
                 .add_y(2)
                 .set_height(1)
-                .set_width(state.palette.bg.len() as u32);
+                .set_width(state.palette.bg.len() as u32 + 1);
             fn coord_to_index(c: Coord) -> PaletteIndex {
                 if c.x == 0 {
                     PaletteIndex::None
