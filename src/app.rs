@@ -65,6 +65,7 @@ impl Tool {
             Self::Pencil => Some(DrawingEvent::pencil(coord)),
             Self::Fill => Some(DrawingEvent::flood_fill(coord)),
             Self::Line => Some(DrawingEvent::line(coord)),
+            Self::Erase => Some(DrawingEvent::erase(coord)),
             _ => None,
         }
     }
@@ -150,10 +151,48 @@ impl LineEvent {
     }
 }
 
+struct EraseEvent {
+    coords: HashSet<Coord>,
+    last_coord: Coord,
+}
+
+impl EraseEvent {
+    fn mouse_press(coord: Coord) -> Self {
+        Self {
+            coords: iter::once(coord).collect(),
+            last_coord: coord,
+        }
+    }
+    fn mouse_move(&mut self, coord: Coord) {
+        for coord in line_2d::coords_between(self.last_coord, coord) {
+            self.coords.insert(coord);
+        }
+        self.last_coord = coord;
+    }
+    fn commit(&self, raster: &mut Raster) {
+        for &coord in self.coords.iter() {
+            raster.clear_coord(coord);
+        }
+    }
+    fn preview(&self, ctx: Ctx, fb: &mut FrameBuffer) {
+        let blank_render_cell = RenderCell {
+            character: Some('█'),
+            style: Style {
+                foreground: Some(Rgba32::new_grey(0)),
+                ..Default::default()
+            },
+        };
+        for &coord in self.coords.iter() {
+            fb.set_cell_relative_to_ctx(ctx, coord, 0, blank_render_cell);
+        }
+    }
+}
+
 enum DrawingEvent {
     Pencil(PencilEvent),
     Fill(FillEvent),
     Line(LineEvent),
+    Erase(EraseEvent),
 }
 
 impl DrawingEvent {
@@ -166,11 +205,15 @@ impl DrawingEvent {
     fn line(coord: Coord) -> Self {
         Self::Line(LineEvent::mouse_press(coord))
     }
+    fn erase(coord: Coord) -> Self {
+        Self::Erase(EraseEvent::mouse_press(coord))
+    }
     fn mouse_move(&mut self, coord: Coord) {
         match self {
             Self::Pencil(pencil) => pencil.mouse_move(coord),
             Self::Fill(flood_fill) => flood_fill.mouse_move(coord),
             Self::Line(line) => line.mouse_move(coord),
+            Self::Erase(erase) => erase.mouse_move(coord),
         }
     }
     fn commit(&self, render_cell: RenderCell, raster: &mut Raster) {
@@ -178,6 +221,7 @@ impl DrawingEvent {
             Self::Pencil(pencil) => pencil.commit(render_cell, raster),
             Self::Fill(flood_fill) => flood_fill.commit(render_cell, raster),
             Self::Line(line) => line.commit(render_cell, raster),
+            Self::Erase(erase) => erase.commit(raster),
         }
     }
     fn preview(&self, raster: &Raster, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
@@ -185,6 +229,7 @@ impl DrawingEvent {
             Self::Pencil(pencil) => pencil.preview(render_cell, ctx, fb),
             Self::Fill(flood_fill) => flood_fill.preview(raster, render_cell, ctx, fb),
             Self::Line(line) => line.preview(render_cell, ctx, fb),
+            Self::Erase(erase) => erase.preview(ctx, fb),
         }
     }
 }
@@ -212,6 +257,16 @@ impl Raster {
             raster_cell.style.foreground = cell.style.foreground.or(raster_cell.style.foreground);
             raster_cell.style.bold = cell.style.bold.or(raster_cell.style.bold);
             raster_cell.style.underline = cell.style.bold.or(raster_cell.style.underline);
+        }
+    }
+
+    fn clear_coord(&mut self, coord: Coord) {
+        if let Some(raster_cell) = self.grid.get_mut(coord) {
+            raster_cell.character = None;
+            raster_cell.style.background = None;
+            raster_cell.style.foreground = None;
+            raster_cell.style.bold = None;
+            raster_cell.style.underline = None;
         }
     }
 
