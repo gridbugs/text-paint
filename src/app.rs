@@ -41,7 +41,6 @@ enum Tool {
     Fill,
     Erase,
     Eyedrop,
-    Text,
 }
 
 impl fmt::Display for Tool {
@@ -52,7 +51,6 @@ impl fmt::Display for Tool {
             Self::Fill => "Fill",
             Self::Erase => "Erase",
             Self::Eyedrop => "Eyedrop",
-            Self::Text => "Text",
         };
         write!(f, "{}", s)
     }
@@ -61,7 +59,7 @@ impl fmt::Display for Tool {
 impl Tool {
     fn all() -> Vec<Self> {
         use Tool::*;
-        vec![Pencil, Fill, Line, Erase, Eyedrop, Text]
+        vec![Pencil, Fill, Line, Erase, Eyedrop]
     }
 
     fn new_event(self, coord: Coord) -> Option<DrawingEvent> {
