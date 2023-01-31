@@ -140,7 +140,10 @@ impl FillEvent {
     }
     fn preview(&self, raster: &Raster, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
         for coord in raster.flood_fill(self.start) {
-            fb.set_cell_relative_to_ctx(ctx, coord, 0, render_cell);
+            if let Some(&current_cell) = raster.grid.get(coord) {
+                let stacked_render_cell = Raster::stack_render_cells(current_cell, render_cell);
+                fb.set_cell_relative_to_ctx(ctx, coord, 0, stacked_render_cell);
+            }
         }
     }
 }
@@ -165,9 +168,12 @@ impl LineEvent {
             raster.set_coord(coord, render_cell);
         }
     }
-    fn preview(&self, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
+    fn preview(&self, raster: &Raster, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
         for coord in line_2d::coords_between(self.start, self.end) {
-            fb.set_cell_relative_to_ctx(ctx, coord, 0, render_cell);
+            if let Some(&current_cell) = raster.grid.get(coord) {
+                let stacked_render_cell = Raster::stack_render_cells(current_cell, render_cell);
+                fb.set_cell_relative_to_ctx(ctx, coord, 0, stacked_render_cell);
+            }
         }
     }
 }
@@ -249,7 +255,7 @@ impl DrawingEvent {
         match self {
             Self::Pencil(pencil) => pencil.preview(raster, render_cell, ctx, fb),
             Self::Fill(flood_fill) => flood_fill.preview(raster, render_cell, ctx, fb),
-            Self::Line(line) => line.preview(render_cell, ctx, fb),
+            Self::Line(line) => line.preview(raster, render_cell, ctx, fb),
             Self::Erase(erase) => erase.preview(ctx, fb),
         }
     }
@@ -264,7 +270,7 @@ impl Raster {
     fn new(size: Size) -> Self {
         let cell = RenderCell {
             character: None,
-            style: Style::default(),
+            style: Style::default().with_background(Rgba32::new_grey(0)),
         };
         Self {
             grid: Grid::new_clone(size, cell),
@@ -282,7 +288,13 @@ impl Raster {
         let mut ret = bottom;
         ret.character = top.character.or(bottom.character);
         ret.style.background = blend(top.style.background, bottom.style.background);
-        ret.style.foreground = blend(top.style.foreground, bottom.style.foreground);
+        // blend the foreground with the background if there is currently no character present
+        let bottom_foreground = if bottom.character.is_none() {
+            bottom.style.background
+        } else {
+            bottom.style.foreground
+        };
+        ret.style.foreground = blend(top.style.foreground, bottom_foreground);
         ret.style.bold = top.style.bold.or(bottom.style.bold);
         ret.style.underline = top.style.bold.or(bottom.style.underline);
         ret
@@ -296,14 +308,12 @@ impl Raster {
 
     fn clear_coord(&mut self, coord: Coord) {
         if let Some(raster_cell) = self.grid.get_mut(coord) {
-            raster_cell.character = None;
-            raster_cell.style.background = None;
-            raster_cell.style.foreground = None;
-            raster_cell.style.bold = None;
-            raster_cell.style.underline = None;
+            *raster_cell = RenderCell {
+                character: None,
+                style: Style::default().with_background(Rgba32::new_grey(0)),
+            };
         }
     }
-
     fn flood_fill(&self, coord: Coord) -> HashSet<Coord> {
         use gridbugs::direction::CardinalDirection;
         use std::collections::VecDeque;
