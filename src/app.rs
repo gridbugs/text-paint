@@ -5,7 +5,11 @@ use gridbugs::{
     line_2d,
     rgb_int::Rgb24,
 };
-use std::{collections::HashSet, fmt, iter, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt, iter,
+    path::PathBuf,
+};
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum PaletteIndex {
@@ -72,31 +76,48 @@ impl Tool {
 }
 
 struct PencilEvent {
-    coords: HashSet<Coord>,
+    coords: HashMap<Coord, u32>,
     last_coord: Coord,
 }
 
 impl PencilEvent {
     fn mouse_press(coord: Coord) -> Self {
         Self {
-            coords: iter::once(coord).collect(),
+            coords: iter::once((coord, 1)).collect(),
             last_coord: coord,
         }
     }
     fn mouse_move(&mut self, coord: Coord) {
-        for coord in line_2d::coords_between(self.last_coord, coord) {
-            self.coords.insert(coord);
+        if coord != self.last_coord {
+            let iter =
+                line_2d::LineSegment::new(self.last_coord, coord).config_iter(line_2d::Config {
+                    exclude_start: true,
+                    exclude_end: false,
+                });
+            for coord in iter {
+                *self.coords.entry(coord).or_insert(0) += 1;
+            }
+            self.last_coord = coord;
         }
-        self.last_coord = coord;
     }
     fn commit(&self, render_cell: RenderCell, raster: &mut Raster) {
-        for &coord in self.coords.iter() {
-            raster.set_coord(coord, render_cell);
+        for (&coord, &count) in self.coords.iter() {
+            for _ in 0..count {
+                raster.set_coord(coord, render_cell);
+            }
         }
     }
-    fn preview(&self, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
-        for &coord in self.coords.iter() {
-            fb.set_cell_relative_to_ctx(ctx, coord, 0, render_cell);
+    fn preview(&self, raster: &Raster, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
+        for (&coord, &count) in self.coords.iter() {
+            // chargrid's alpha compositing doesn't blend foreground colours so fake it here
+            if let Some(&stacked_render_cell) = raster.grid.get(coord) {
+                let mut stacked_render_cell = stacked_render_cell;
+                for _ in 0..count {
+                    stacked_render_cell =
+                        Raster::stack_render_cells(stacked_render_cell, render_cell);
+                }
+                fb.set_cell_relative_to_ctx(ctx, coord, 0, stacked_render_cell);
+            }
         }
     }
 }
@@ -226,7 +247,7 @@ impl DrawingEvent {
     }
     fn preview(&self, raster: &Raster, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
         match self {
-            Self::Pencil(pencil) => pencil.preview(render_cell, ctx, fb),
+            Self::Pencil(pencil) => pencil.preview(raster, render_cell, ctx, fb),
             Self::Fill(flood_fill) => flood_fill.preview(raster, render_cell, ctx, fb),
             Self::Line(line) => line.preview(render_cell, ctx, fb),
             Self::Erase(erase) => erase.preview(ctx, fb),
@@ -250,13 +271,26 @@ impl Raster {
         }
     }
 
+    fn stack_render_cells(bottom: RenderCell, top: RenderCell) -> RenderCell {
+        fn blend(a: Option<Rgba32>, b: Option<Rgba32>) -> Option<Rgba32> {
+            match (a, b) {
+                (None, None) => None,
+                (Some(x), None) | (None, Some(x)) => Some(x),
+                (Some(a), Some(b)) => Some(a.alpha_composite(b)),
+            }
+        }
+        let mut ret = bottom;
+        ret.character = top.character.or(bottom.character);
+        ret.style.background = blend(top.style.background, bottom.style.background);
+        ret.style.foreground = blend(top.style.foreground, bottom.style.foreground);
+        ret.style.bold = top.style.bold.or(bottom.style.bold);
+        ret.style.underline = top.style.bold.or(bottom.style.underline);
+        ret
+    }
+
     fn set_coord(&mut self, coord: Coord, cell: RenderCell) {
         if let Some(raster_cell) = self.grid.get_mut(coord) {
-            raster_cell.character = cell.character.or(raster_cell.character);
-            raster_cell.style.background = cell.style.background.or(raster_cell.style.background);
-            raster_cell.style.foreground = cell.style.foreground.or(raster_cell.style.foreground);
-            raster_cell.style.bold = cell.style.bold.or(raster_cell.style.bold);
-            raster_cell.style.underline = cell.style.bold.or(raster_cell.style.underline);
+            *raster_cell = Self::stack_render_cells(*raster_cell, cell);
         }
     }
 
@@ -359,6 +393,8 @@ struct AppState {
     current_event: Option<DrawingEvent>,
     undo_buffer: UndoBuffer,
     eyedrop_render_cell: Option<RenderCell>,
+    fg_transparency: u8,
+    bg_transparency: u8,
 }
 
 impl AppState {
@@ -377,6 +413,8 @@ impl AppState {
             current_event: None,
             undo_buffer,
             eyedrop_render_cell: None,
+            fg_transparency: 90,
+            bg_transparency: 90,
         }
     }
 
@@ -391,14 +429,14 @@ impl AppState {
         self.palette_indices
             .fg?
             .option()
-            .map(|i| self.palette.fg[i].to_rgba32(255))
+            .map(|i| self.palette.fg[i].to_rgba32(self.fg_transparency))
     }
 
     fn get_bg(&self) -> Option<Rgba32> {
         self.palette_indices
             .bg?
             .option()
-            .map(|i| self.palette.bg[i].to_rgba32(255))
+            .map(|i| self.palette.bg[i].to_rgba32(self.bg_transparency))
     }
 
     fn current_render_cell(&self) -> RenderCell {
@@ -461,7 +499,11 @@ impl Component for PaletteComponent {
     type State = AppState;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
         {
-            fb.set_cell_relative_to_ctx(ctx, Coord::new(0, 1), 0, state.current_render_cell());
+            let preview_cell = state.current_render_cell();
+            let preview_cell = preview_cell
+                .with_foreground_option(preview_cell.foreground().map(|c| c.with_a(255)))
+                .with_background_option(preview_cell.background().map(|c| c.with_a(255)));
+            fb.set_cell_relative_to_ctx(ctx, Coord::new(0, 1), 0, preview_cell);
         }
         let ctx = ctx.add_x(self.preview_offset());
         self.ch_label.render(&(), ctx, fb);
@@ -652,8 +694,120 @@ impl Component for PaletteComponent {
             }
         }
     }
-    fn size(&self, _state: &Self::State, ctx: Ctx) -> Size {
-        ctx.bounding_box.size().set_height(3)
+    fn size(&self, _state: &Self::State, _ctx: Ctx) -> Size {
+        Size::new(40, 3)
+    }
+}
+
+struct TransparencyComponent {
+    fg_label: text::StyledString,
+    bg_label: text::StyledString,
+}
+
+impl TransparencyComponent {
+    fn new() -> Self {
+        Self {
+            fg_label: text::StyledString::plain_text("fg ".to_string()),
+            bg_label: text::StyledString::plain_text("bg ".to_string()),
+        }
+    }
+}
+
+impl Component for TransparencyComponent {
+    type Output = ();
+    type State = AppState;
+    fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
+        let num_digits = 3;
+        let slider_left_padding = self.bg_label.string.len() + num_digits + 1;
+        let width = ctx.bounding_box.size().width();
+        let slider_bar_width = 4;
+        let slider_space_width = width - slider_left_padding as u32;
+        {
+            let slider_offset =
+                (state.fg_transparency as u32 * (slider_space_width - slider_bar_width)) / 255;
+            let ctx = ctx.add_y(1);
+            self.fg_label.render(&(), ctx, fb);
+            let ctx = ctx.add_x(self.fg_label.string.len() as i32);
+            text::StyledString::plain_text(format!("{}", state.fg_transparency)).render(
+                &(),
+                ctx,
+                fb,
+            );
+            let ctx = ctx.add_x(num_digits as i32 + 1);
+            for i in 0..slider_space_width {
+                fb.set_cell_relative_to_ctx(
+                    ctx,
+                    Coord::new(i as i32, 0),
+                    0,
+                    RenderCell {
+                        character: Some('-'),
+                        style: Style::plain_text(),
+                    },
+                );
+            }
+            for i in 0..slider_bar_width {
+                fb.set_cell_relative_to_ctx(
+                    ctx,
+                    Coord::new(slider_offset as i32 + i as i32, 0),
+                    0,
+                    RenderCell {
+                        character: Some('█'),
+                        style: Style::plain_text(),
+                    },
+                );
+            }
+        }
+        {
+            let slider_offset =
+                (state.bg_transparency as u32 * (slider_space_width - slider_bar_width)) / 255;
+            let ctx = ctx.add_y(2);
+            self.bg_label.render(&(), ctx, fb);
+            let ctx = ctx.add_x(self.bg_label.string.len() as i32);
+            text::StyledString::plain_text(format!("{}", state.bg_transparency)).render(
+                &(),
+                ctx,
+                fb,
+            );
+            let ctx = ctx.add_x(num_digits as i32 + 1);
+            for i in 0..slider_space_width {
+                fb.set_cell_relative_to_ctx(
+                    ctx,
+                    Coord::new(i as i32, 0),
+                    0,
+                    RenderCell {
+                        character: Some('-'),
+                        style: Style::plain_text(),
+                    },
+                );
+            }
+            for i in 0..slider_bar_width {
+                fb.set_cell_relative_to_ctx(
+                    ctx,
+                    Coord::new(slider_offset as i32 + i as i32, 0),
+                    0,
+                    RenderCell {
+                        character: Some('█'),
+                        style: Style::plain_text(),
+                    },
+                );
+            }
+        }
+    }
+    fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, event: Event) -> Self::Output {
+        if let Some(mouse_input) = event.mouse_input() {
+            match mouse_input {
+                MouseInput::MousePress {
+                    button: MouseButton::Left,
+                    coord,
+                } => {
+                    let _ = coord;
+                }
+                _ => (),
+            }
+        }
+    }
+    fn size(&self, _state: &Self::State, _ctx: Ctx) -> Size {
+        Size::new(40, 3)
     }
 }
 
@@ -728,7 +882,12 @@ impl Component for CanvasComponent {
             fb.set_cell_relative_to_ctx(ctx, coord, 0, cell);
         }
         if let Some(current_event) = state.current_event.as_ref() {
-            current_event.preview(&state.canvas_state, state.current_render_cell(), ctx, fb);
+            current_event.preview(
+                &state.canvas_state,
+                state.current_render_cell(),
+                ctx.add_depth(1),
+                fb,
+            );
         }
     }
     fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
@@ -783,12 +942,14 @@ impl Component for CanvasComponent {
 
 struct GuiComponent {
     palette: Border<PaletteComponent>,
+    transparency: Border<TransparencyComponent>,
     tools: Border<ToolsComponent>,
     canvas: Border<CanvasComponent>,
 }
 
 struct GuiChildCtxs<'a> {
     palette: Ctx<'a>,
+    transparency: Ctx<'a>,
     tools: Ctx<'a>,
     canvas: Ctx<'a>,
 }
@@ -812,10 +973,12 @@ impl GuiComponent {
 
     fn new() -> Self {
         let palette = Self::border(PaletteComponent::new(), "Palette");
+        let transparency = Self::border(TransparencyComponent::new(), "Transparency");
         let tools = Self::border(ToolsComponent, "Tools");
         let canvas = Self::border(CanvasComponent, "Canvas");
         Self {
             palette,
+            transparency,
             tools,
             canvas,
         }
@@ -823,9 +986,13 @@ impl GuiComponent {
 
     fn child_ctxs<'a>(&self, state: &AppState, ctx: Ctx<'a>) -> GuiChildCtxs<'a> {
         let palette_size = self.palette.size(state, ctx);
+        let transparency_size = self.transparency.size(state, ctx);
         let tools_size = self.tools.size(state, ctx);
         let palette =
             ctx.add_y(ctx.bounding_box.size().height() as i32 - palette_size.height() as i32);
+        let transparency = palette
+            .add_x(palette_size.width() as i32)
+            .set_width(transparency_size.width());
         let height_above_palette =
             (ctx.bounding_box.size().height() as i32 - palette_size.height() as i32) as u32;
         let tools = ctx.set_size(tools_size);
@@ -834,6 +1001,7 @@ impl GuiComponent {
             .add_x(tools_size.width() as i32);
         GuiChildCtxs {
             palette,
+            transparency,
             tools,
             canvas,
         }
@@ -846,6 +1014,7 @@ impl Component for GuiComponent {
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
         let ctxs = self.child_ctxs(state, ctx);
         self.palette.render(state, ctxs.palette, fb);
+        self.transparency.render(state, ctxs.transparency, fb);
         self.tools.render(state, ctxs.tools, fb);
         self.canvas.render(state, ctxs.canvas, fb);
     }
