@@ -303,7 +303,7 @@ struct AppState {
     canvas_hover: Option<Coord>,
     current_event: Option<DrawingEvent>,
     undo_buffer: UndoBuffer,
-    eyedropper_render_cell: Option<RenderCell>,
+    eyedrop_render_cell: Option<RenderCell>,
 }
 
 impl AppState {
@@ -321,7 +321,7 @@ impl AppState {
             canvas_hover: None,
             current_event: None,
             undo_buffer,
-            eyedropper_render_cell: None,
+            eyedrop_render_cell: None,
         }
     }
 
@@ -347,7 +347,7 @@ impl AppState {
     }
 
     fn current_render_cell(&self) -> RenderCell {
-        self.eyedropper_render_cell.unwrap_or_else(|| RenderCell {
+        self.eyedrop_render_cell.unwrap_or_else(|| RenderCell {
             character: self.get_ch(),
             style: Style::default()
                 .with_foreground_option(self.get_fg())
@@ -591,7 +591,7 @@ impl Component for PaletteComponent {
                     if let Some(coord) = bg_bb.coord_absolute_to_relative(coord) {
                         state.palette_indices.bg = Some(coord_to_index(coord));
                     }
-                    state.eyedropper_render_cell = None;
+                    state.eyedrop_render_cell = None;
                 }
                 _ => (),
             }
@@ -693,7 +693,7 @@ impl Component for CanvasComponent {
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
                             if let Some(&render_cell) = state.canvas_state.grid.get(coord) {
-                                state.eyedropper_render_cell = Some(render_cell);
+                                state.eyedrop_render_cell = Some(render_cell);
                                 state.palette_indices.ch = None;
                                 state.palette_indices.fg = None;
                                 state.palette_indices.bg = None;
