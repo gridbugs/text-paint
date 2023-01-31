@@ -413,8 +413,8 @@ impl AppState {
             current_event: None,
             undo_buffer,
             eyedrop_render_cell: None,
-            fg_transparency: 90,
-            bg_transparency: 90,
+            fg_transparency: 255,
+            bg_transparency: 255,
         }
     }
 
