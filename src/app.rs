@@ -5,7 +5,7 @@ use gridbugs::{
     line_2d,
     rgb_int::Rgb24,
 };
-use std::{collections::HashSet, fmt, path::PathBuf};
+use std::{collections::HashSet, fmt, iter, path::PathBuf};
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum PaletteIndex {
@@ -63,28 +63,134 @@ impl Tool {
         use Tool::*;
         vec![Pencil, Fill, Line, Erase, Eyedrop, Text]
     }
+
+    fn new_event(self, coord: Coord) -> Option<DrawingEvent> {
+        match self {
+            Self::Pencil => Some(DrawingEvent::pencil(coord)),
+            Self::Fill => Some(DrawingEvent::flood_fill(coord)),
+            Self::Line => Some(DrawingEvent::line(coord)),
+            _ => None,
+        }
+    }
 }
 
 struct PencilEvent {
-    render_cell: RenderCell,
     coords: HashSet<Coord>,
+    last_coord: Coord,
 }
 
-struct FloodFillEvent {
-    render_cell: RenderCell,
+impl PencilEvent {
+    fn mouse_press(coord: Coord) -> Self {
+        Self {
+            coords: iter::once(coord).collect(),
+            last_coord: coord,
+        }
+    }
+    fn mouse_move(&mut self, coord: Coord) {
+        for coord in line_2d::coords_between(self.last_coord, coord) {
+            self.coords.insert(coord);
+        }
+        self.last_coord = coord;
+    }
+    fn commit(&self, render_cell: RenderCell, raster: &mut Raster) {
+        for &coord in self.coords.iter() {
+            raster.set_coord(coord, render_cell);
+        }
+    }
+    fn preview(&self, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
+        for &coord in self.coords.iter() {
+            fb.set_cell_relative_to_ctx(ctx, coord, 0, render_cell);
+        }
+    }
+}
+
+struct FillEvent {
     start: Coord,
 }
 
+impl FillEvent {
+    fn mouse_press(coord: Coord) -> Self {
+        Self { start: coord }
+    }
+    fn mouse_move(&mut self, coord: Coord) {
+        self.start = coord;
+    }
+    fn commit(&self, render_cell: RenderCell, raster: &mut Raster) {
+        for coord in raster.flood_fill(self.start) {
+            raster.set_coord(coord, render_cell);
+        }
+    }
+    fn preview(&self, raster: &Raster, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
+        for coord in raster.flood_fill(self.start) {
+            fb.set_cell_relative_to_ctx(ctx, coord, 0, render_cell);
+        }
+    }
+}
+
 struct LineEvent {
-    render_cell: RenderCell,
     start: Coord,
     end: Coord,
 }
 
+impl LineEvent {
+    fn mouse_press(coord: Coord) -> Self {
+        Self {
+            start: coord,
+            end: coord,
+        }
+    }
+    fn mouse_move(&mut self, coord: Coord) {
+        self.end = coord;
+    }
+    fn commit(&self, render_cell: RenderCell, raster: &mut Raster) {
+        for coord in line_2d::coords_between(self.start, self.end) {
+            raster.set_coord(coord, render_cell);
+        }
+    }
+    fn preview(&self, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
+        for coord in line_2d::coords_between(self.start, self.end) {
+            fb.set_cell_relative_to_ctx(ctx, coord, 0, render_cell);
+        }
+    }
+}
+
 enum DrawingEvent {
     Pencil(PencilEvent),
-    FloodFill(FloodFillEvent),
+    Fill(FillEvent),
     Line(LineEvent),
+}
+
+impl DrawingEvent {
+    fn pencil(coord: Coord) -> Self {
+        Self::Pencil(PencilEvent::mouse_press(coord))
+    }
+    fn flood_fill(coord: Coord) -> Self {
+        Self::Fill(FillEvent::mouse_press(coord))
+    }
+    fn line(coord: Coord) -> Self {
+        Self::Line(LineEvent::mouse_press(coord))
+    }
+    fn mouse_move(&mut self, coord: Coord) {
+        match self {
+            Self::Pencil(pencil) => pencil.mouse_move(coord),
+            Self::Fill(flood_fill) => flood_fill.mouse_move(coord),
+            Self::Line(line) => line.mouse_move(coord),
+        }
+    }
+    fn commit(&self, render_cell: RenderCell, raster: &mut Raster) {
+        match self {
+            Self::Pencil(pencil) => pencil.commit(render_cell, raster),
+            Self::Fill(flood_fill) => flood_fill.commit(render_cell, raster),
+            Self::Line(line) => line.commit(render_cell, raster),
+        }
+    }
+    fn preview(&self, raster: &Raster, render_cell: RenderCell, ctx: Ctx, fb: &mut FrameBuffer) {
+        match self {
+            Self::Pencil(pencil) => pencil.preview(render_cell, ctx, fb),
+            Self::Fill(flood_fill) => flood_fill.preview(raster, render_cell, ctx, fb),
+            Self::Line(line) => line.preview(render_cell, ctx, fb),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -137,38 +243,20 @@ impl Raster {
         seen
     }
 
-    fn commit_event(&mut self, event: &DrawingEvent) {
-        match event {
-            DrawingEvent::Pencil(PencilEvent {
-                render_cell,
-                coords,
-            }) => {
-                for &coord in coords.iter() {
-                    self.set_coord(coord, *render_cell);
-                }
-            }
-            DrawingEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
-                for coord in self.flood_fill(*start) {
-                    self.set_coord(coord, *render_cell);
-                }
-            }
-            DrawingEvent::Line(LineEvent {
-                render_cell,
-                start,
-                end,
-            }) => {
-                for coord in line_2d::coords_between(*start, *end) {
-                    self.set_coord(coord, *render_cell);
-                }
-            }
-        }
+    fn commit_event(&mut self, event: &DrawingEventWithRenderCell) {
+        event.drawing_event.commit(event.render_cell, self);
     }
+}
+
+struct DrawingEventWithRenderCell {
+    drawing_event: DrawingEvent,
+    render_cell: RenderCell,
 }
 
 struct UndoBuffer {
     initial: Raster,
-    events: Vec<DrawingEvent>,
-    redo_buffer: Vec<DrawingEvent>,
+    events: Vec<DrawingEventWithRenderCell>,
+    redo_buffer: Vec<DrawingEventWithRenderCell>,
 }
 
 impl UndoBuffer {
@@ -202,7 +290,7 @@ impl UndoBuffer {
         raster
     }
 
-    fn commit_event(&mut self, event: DrawingEvent) {
+    fn commit_event(&mut self, event: DrawingEventWithRenderCell) {
         self.events.push(event);
         self.redo_buffer.clear();
     }
@@ -216,7 +304,6 @@ struct AppState {
     tool_index: usize,
     tool_hover: Option<usize>,
     canvas_state: Raster,
-    canvas_mouse_down_coord: Option<Coord>,
     canvas_hover: Option<Coord>,
     current_event: Option<DrawingEvent>,
     undo_buffer: UndoBuffer,
@@ -234,7 +321,6 @@ impl AppState {
             tool_index: 0,
             tool_hover: None,
             canvas_state,
-            canvas_mouse_down_coord: None,
             canvas_hover: None,
             current_event: None,
             undo_buffer,
@@ -273,7 +359,11 @@ impl AppState {
     }
 
     fn commit_current_event(&mut self) {
-        if let Some(event) = self.current_event.take() {
+        if let Some(drawing_event) = self.current_event.take() {
+            let event = DrawingEventWithRenderCell {
+                drawing_event,
+                render_cell: self.current_render_cell(),
+            };
             self.canvas_state.commit_event(&event);
             self.undo_buffer.commit_event(event);
         }
@@ -455,7 +545,6 @@ impl Component for PaletteComponent {
     }
     fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
         if let Some(mouse_input) = event.mouse_input() {
-            use input::MouseButton;
             let ctx = ctx.add_x(self.preview_offset());
             let ctx = ctx.add_x(self.palette_x_offset());
             let ch_bb = ctx
@@ -540,7 +629,6 @@ impl Component for ToolsComponent {
     }
     fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
         if let Some(mouse_input) = event.mouse_input() {
-            use input::MouseButton;
             match mouse_input {
                 MouseInput::MouseMove { coord, .. } => {
                     state.tool_hover = ctx
@@ -583,143 +671,10 @@ impl Component for CanvasComponent {
             fb.set_cell_relative_to_ctx(ctx, coord, 0, cell);
         }
         if let Some(current_event) = state.current_event.as_ref() {
-            match current_event {
-                DrawingEvent::Pencil(PencilEvent {
-                    render_cell,
-                    coords,
-                }) => {
-                    for &coord in coords.iter() {
-                        fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
-                    }
-                }
-                DrawingEvent::FloodFill(FloodFillEvent { render_cell, start }) => {
-                    for coord in state.canvas_state.flood_fill(*start) {
-                        fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
-                    }
-                }
-                DrawingEvent::Line(LineEvent {
-                    render_cell,
-                    start,
-                    end,
-                }) => {
-                    for coord in line_2d::coords_between(*start, *end) {
-                        fb.set_cell_relative_to_ctx(ctx, coord, 1, *render_cell);
-                    }
-                }
-            }
+            current_event.preview(&state.canvas_state, state.current_render_cell(), ctx, fb);
         }
     }
-    fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
-        if let Some(mouse_input) = event.mouse_input() {
-            use input::MouseButton;
-            state.canvas_hover = ctx
-                .bounding_box
-                .coord_absolute_to_relative(mouse_input.coord());
-            match state.current_tool() {
-                Tool::Pencil => match mouse_input {
-                    MouseInput::MousePress {
-                        button: MouseButton::Left,
-                        coord,
-                    } => {
-                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            let mut coords = HashSet::new();
-                            coords.insert(coord);
-                            state.current_event = Some(DrawingEvent::Pencil(PencilEvent {
-                                render_cell: state.current_render_cell(),
-                                coords,
-                            }));
-                            state.canvas_mouse_down_coord = Some(coord);
-                        }
-                    }
-                    MouseInput::MouseMove {
-                        button: Some(MouseButton::Left),
-                        coord,
-                    } => {
-                        if let Some(DrawingEvent::Pencil(PencilEvent { coords, .. })) =
-                            state.current_event.as_mut()
-                        {
-                            if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
-                            {
-                                if let Some(prev_coord) = state.canvas_mouse_down_coord {
-                                    for coord in line_2d::coords_between(prev_coord, coord) {
-                                        coords.insert(coord);
-                                    }
-                                } else {
-                                    coords.insert(coord);
-                                }
-                                state.canvas_mouse_down_coord = Some(coord);
-                            }
-                        }
-                    }
-                    MouseInput::MouseRelease { .. } => {
-                        state.commit_current_event();
-                        state.canvas_mouse_down_coord = None;
-                    }
-                    _ => (),
-                },
-                Tool::Fill => match mouse_input {
-                    MouseInput::MousePress {
-                        button: MouseButton::Left,
-                        coord,
-                    } => {
-                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            state.current_event = Some(DrawingEvent::FloodFill(FloodFillEvent {
-                                render_cell: state.current_render_cell(),
-                                start: coord,
-                            }));
-                        }
-                    }
-                    MouseInput::MouseMove {
-                        button: Some(MouseButton::Left),
-                        coord,
-                    } => {
-                        if let Some(DrawingEvent::FloodFill(FloodFillEvent { start, .. })) =
-                            state.current_event.as_mut()
-                        {
-                            if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord)
-                            {
-                                *start = coord;
-                            }
-                        }
-                    }
-                    MouseInput::MouseRelease { .. } => {
-                        state.commit_current_event();
-                    }
-                    _ => (),
-                },
-                Tool::Line => match mouse_input {
-                    MouseInput::MousePress {
-                        button: MouseButton::Left,
-                        coord,
-                    } => {
-                        if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            state.canvas_mouse_down_coord = Some(coord);
-                        }
-                    }
-                    MouseInput::MouseMove {
-                        button: Some(MouseButton::Left),
-                        coord,
-                    } => {
-                        if let Some(end) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            if let Some(start) = state.canvas_mouse_down_coord {
-                                state.current_event = Some(DrawingEvent::Line(LineEvent {
-                                    start,
-                                    end,
-                                    render_cell: state.current_render_cell(),
-                                }));
-                            }
-                        }
-                    }
-                    MouseInput::MouseRelease { .. } => {
-                        state.commit_current_event();
-                        state.canvas_mouse_down_coord = None;
-                    }
-                    _ => (),
-                },
-                other_tool => eprintln!("{} is unimplemented", other_tool),
-            }
-        }
-    }
+    fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, _event: Event) -> Self::Output {}
     fn size(&self, state: &Self::State, ctx: Ctx) -> Size {
         state
             .canvas_state
@@ -810,8 +765,33 @@ impl Component for GuiComponent {
             if ctxs.tools.bounding_box.contains_coord(mouse_input.coord()) {
                 self.tools.update(state, ctxs.tools, event)
             }
-            if ctxs.canvas.bounding_box.contains_coord(mouse_input.coord()) {
-                self.canvas.update(state, ctxs.canvas, event)
+            state.canvas_hover = ctxs
+                .canvas
+                .bounding_box
+                .coord_absolute_to_relative(mouse_input.coord());
+            let mouse_coord = mouse_input.coord();
+            match mouse_input {
+                MouseInput::MousePress {
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    if let Some(coord) = state.canvas_hover {
+                        state.current_event = state.current_tool().new_event(coord);
+                    }
+                }
+                MouseInput::MouseMove {
+                    button: Some(MouseButton::Left),
+                    ..
+                } => {
+                    if let Some(current_event) = state.current_event.as_mut() {
+                        let coord = mouse_coord - ctxs.canvas.bounding_box.top_left();
+                        current_event.mouse_move(coord);
+                    }
+                }
+                MouseInput::MouseRelease { .. } => {
+                    state.commit_current_event();
+                }
+                _ => (),
             }
         } else if let Some(keyboard_input) = event.keyboard_input() {
             match keyboard_input {
