@@ -208,9 +208,9 @@ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "chargrid"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "545b77cd9e00f5c958d941b3621db2a49646a51d9d814e160bedd4d800eb205d"
+checksum = "cb9feb1ded79b43c8dd6f2574bb42e7292a1d60681cc865e982b28e7996390f7"
 dependencies = [
  "chargrid_common",
  "chargrid_core",
@@ -218,9 +218,9 @@ dependencies = [
 
 [[package]]
 name = "chargrid_ansi_terminal"
-version = "0.3.3"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd71b3b11f67ed0f5258664b1660814799287932e34637f311cfcb434985f11a"
+checksum = "b6726c94fa5d119346f4904698e84878cf6ed123e95393529276a72e34c39f80"
 dependencies = [
  "chargrid_input",
  "chargrid_runtime",
@@ -231,18 +231,18 @@ dependencies = [
 
 [[package]]
 name = "chargrid_common"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881b291440d0e86e33431bf24fa9e555d2528fa776b91e98ef445fe31b57e9eb"
+checksum = "9c02200f66dc62afbed9964f02c0bb0f4993a95ba13e48bdb5491429915edef4"
 dependencies = [
  "chargrid_core",
 ]
 
 [[package]]
 name = "chargrid_core"
-version = "0.1.6"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "522e46428105a963d3c42d0cac28f8b77f518bf988c19c6ac85bd59cfea020d0"
+checksum = "849872c3e25afe6f9aeffcdeb6cb4bacebc6cad6c84fdbfe25d4507e7372e95f"
 dependencies = [
  "chargrid_input",
  "grid_2d",
@@ -251,27 +251,27 @@ dependencies = [
 
 [[package]]
 name = "chargrid_input"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cee15585fe390bbbf8a9255b3be6ccc0db61a6a6f0835c4646152f497815066d"
+checksum = "c67803d25e39e131126a6222bc6d4c834378d6c8f64a08eb37535233a4ff45db"
 dependencies = [
  "coord_2d",
 ]
 
 [[package]]
 name = "chargrid_runtime"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "442d09effd584dc75e7abb86f92f6d81727bfeb57199723c2009dfdc0f597d33"
+checksum = "ebb84541fae18778194319c71039f383bd9ab4831f45772d6ee1ccae93078c3c"
 dependencies = [
  "chargrid_core",
 ]
 
 [[package]]
 name = "chargrid_wgpu"
-version = "0.2.4"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad29a219e3eeb3fdbbf2ce84264534f2de4baad45014b8026b0c39cc9b8944a6"
+checksum = "0ee712e123df9f85c529d245911ce03ec5ff9769b794579ecc48adeecd70debd"
 dependencies = [
  "async-executor",
  "chargrid_input",
@@ -860,9 +860,9 @@ dependencies = [
 
 [[package]]
 name = "gridbugs"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d65abf87cbcf8c06291bb97d2e444f3f226c782c74444116f30713bd30207161"
+checksum = "24998687d2f3fba75f03d661d351fde5226ab8c79f8d70992c3b5bea806ba599"
 dependencies = [
  "chargrid",
  "chargrid_ansi_terminal",

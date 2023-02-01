@@ -10,7 +10,7 @@ toml = "0.6"
 nom = "7.1"
 
 [dependencies.gridbugs]
-version = "0.6"
+version = "0.7"
 features = [
     "chargrid",
     "chargrid_wgpu",
