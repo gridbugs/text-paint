@@ -403,8 +403,8 @@ struct AppState {
     current_event: Option<DrawingEvent>,
     undo_buffer: UndoBuffer,
     eyedrop_render_cell: Option<RenderCell>,
-    fg_transparency: u8,
-    bg_transparency: u8,
+    fg_opacity: u8,
+    bg_opacity: u8,
 }
 
 impl AppState {
@@ -423,8 +423,8 @@ impl AppState {
             current_event: None,
             undo_buffer,
             eyedrop_render_cell: None,
-            fg_transparency: 255,
-            bg_transparency: 255,
+            fg_opacity: 255,
+            bg_opacity: 255,
         }
     }
 
@@ -439,14 +439,14 @@ impl AppState {
         self.palette_indices
             .fg?
             .option()
-            .map(|i| self.palette.fg[i].to_rgba32(self.fg_transparency))
+            .map(|i| self.palette.fg[i].to_rgba32(self.fg_opacity))
     }
 
     fn get_bg(&self) -> Option<Rgba32> {
         self.palette_indices
             .bg?
             .option()
-            .map(|i| self.palette.bg[i].to_rgba32(self.bg_transparency))
+            .map(|i| self.palette.bg[i].to_rgba32(self.bg_opacity))
     }
 
     fn current_render_cell(&self) -> RenderCell {
@@ -709,12 +709,12 @@ impl Component for PaletteComponent {
     }
 }
 
-struct TransparencyComponent {
+struct OpacityComponent {
     fg_label: text::StyledString,
     bg_label: text::StyledString,
 }
 
-impl TransparencyComponent {
+impl OpacityComponent {
     fn new() -> Self {
         Self {
             fg_label: text::StyledString::plain_text("fg ".to_string()),
@@ -723,7 +723,7 @@ impl TransparencyComponent {
     }
 }
 
-impl Component for TransparencyComponent {
+impl Component for OpacityComponent {
     type Output = ();
     type State = AppState;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
@@ -734,15 +734,11 @@ impl Component for TransparencyComponent {
         let slider_space_width = width - slider_left_padding as u32;
         {
             let slider_offset =
-                (state.fg_transparency as u32 * (slider_space_width - slider_bar_width)) / 255;
+                (state.fg_opacity as u32 * (slider_space_width - slider_bar_width)) / 255;
             let ctx = ctx.add_y(1);
             self.fg_label.render(&(), ctx, fb);
             let ctx = ctx.add_x(self.fg_label.string.len() as i32);
-            text::StyledString::plain_text(format!("{}", state.fg_transparency)).render(
-                &(),
-                ctx,
-                fb,
-            );
+            text::StyledString::plain_text(format!("{}", state.fg_opacity)).render(&(), ctx, fb);
             let ctx = ctx.add_x(num_digits as i32 + 1);
             for i in 0..slider_space_width {
                 fb.set_cell_relative_to_ctx(
@@ -769,15 +765,11 @@ impl Component for TransparencyComponent {
         }
         {
             let slider_offset =
-                (state.bg_transparency as u32 * (slider_space_width - slider_bar_width)) / 255;
+                (state.bg_opacity as u32 * (slider_space_width - slider_bar_width)) / 255;
             let ctx = ctx.add_y(2);
             self.bg_label.render(&(), ctx, fb);
             let ctx = ctx.add_x(self.bg_label.string.len() as i32);
-            text::StyledString::plain_text(format!("{}", state.bg_transparency)).render(
-                &(),
-                ctx,
-                fb,
-            );
+            text::StyledString::plain_text(format!("{}", state.bg_opacity)).render(&(), ctx, fb);
             let ctx = ctx.add_x(num_digits as i32 + 1);
             for i in 0..slider_space_width {
                 fb.set_cell_relative_to_ctx(
@@ -952,14 +944,14 @@ impl Component for CanvasComponent {
 
 struct GuiComponent {
     palette: Border<PaletteComponent>,
-    transparency: Border<TransparencyComponent>,
+    opacity: Border<OpacityComponent>,
     tools: Border<ToolsComponent>,
     canvas: Border<CanvasComponent>,
 }
 
 struct GuiChildCtxs<'a> {
     palette: Ctx<'a>,
-    transparency: Ctx<'a>,
+    opacity: Ctx<'a>,
     tools: Ctx<'a>,
     canvas: Ctx<'a>,
 }
@@ -983,12 +975,12 @@ impl GuiComponent {
 
     fn new() -> Self {
         let palette = Self::border(PaletteComponent::new(), "Palette");
-        let transparency = Self::border(TransparencyComponent::new(), "Transparency");
+        let opacity = Self::border(OpacityComponent::new(), "Opacity");
         let tools = Self::border(ToolsComponent, "Tools");
         let canvas = Self::border(CanvasComponent, "Canvas");
         Self {
             palette,
-            transparency,
+            opacity,
             tools,
             canvas,
         }
@@ -996,13 +988,13 @@ impl GuiComponent {
 
     fn child_ctxs<'a>(&self, state: &AppState, ctx: Ctx<'a>) -> GuiChildCtxs<'a> {
         let palette_size = self.palette.size(state, ctx);
-        let transparency_size = self.transparency.size(state, ctx);
+        let opacity_size = self.opacity.size(state, ctx);
         let tools_size = self.tools.size(state, ctx);
         let palette =
             ctx.add_y(ctx.bounding_box.size().height() as i32 - palette_size.height() as i32);
-        let transparency = palette
+        let opacity = palette
             .add_x(palette_size.width() as i32)
-            .set_width(transparency_size.width());
+            .set_width(opacity_size.width());
         let height_above_palette =
             (ctx.bounding_box.size().height() as i32 - palette_size.height() as i32) as u32;
         let tools = ctx.set_size(tools_size);
@@ -1011,7 +1003,7 @@ impl GuiComponent {
             .add_x(tools_size.width() as i32);
         GuiChildCtxs {
             palette,
-            transparency,
+            opacity,
             tools,
             canvas,
         }
@@ -1024,7 +1016,7 @@ impl Component for GuiComponent {
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
         let ctxs = self.child_ctxs(state, ctx);
         self.palette.render(state, ctxs.palette, fb);
-        self.transparency.render(state, ctxs.transparency, fb);
+        self.opacity.render(state, ctxs.opacity, fb);
         self.tools.render(state, ctxs.tools, fb);
         self.canvas.render(state, ctxs.canvas, fb);
     }
