@@ -1,6 +1,6 @@
 use crate::palette::Palette;
 use gridbugs::{
-    chargrid::{self, border::Border, control_flow::*, prelude::*, text},
+    chargrid::{self, border::Border, control_flow::*, prelude::*, text, text_field::TextField},
     grid_2d::Grid,
     line_2d,
     rgb_int::Rgb24,
@@ -391,7 +391,7 @@ impl UndoBuffer {
     }
 }
 
-struct AppState {
+struct AppData {
     palette: Palette,
     palette_indices: PaletteIndices,
     palette_hover: PaletteIndices,
@@ -407,7 +407,7 @@ struct AppState {
     bg_opacity: u8,
 }
 
-impl AppState {
+impl AppData {
     fn new_with_palette(palette: Palette) -> Self {
         let canvas_state = Raster::new(Size::new(100, 80));
         let undo_buffer = UndoBuffer::new(canvas_state.clone());
@@ -506,7 +506,7 @@ impl PaletteComponent {
 
 impl Component for PaletteComponent {
     type Output = ();
-    type State = AppState;
+    type State = AppData;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
         {
             let preview_cell = state.current_render_cell();
@@ -724,75 +724,20 @@ impl OpacityComponent {
 }
 
 impl Component for OpacityComponent {
-    type Output = ();
-    type State = AppState;
+    type Output = Option<PopUp>;
+    type State = AppData;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        let num_digits = 3;
-        let slider_left_padding = self.bg_label.string.len() + num_digits + 1;
-        let width = ctx.bounding_box.size().width();
-        let slider_bar_width = 4;
-        let slider_space_width = width - slider_left_padding as u32;
         {
-            let slider_offset =
-                (state.fg_opacity as u32 * (slider_space_width - slider_bar_width)) / 255;
             let ctx = ctx.add_y(1);
             self.fg_label.render(&(), ctx, fb);
             let ctx = ctx.add_x(self.fg_label.string.len() as i32);
             text::StyledString::plain_text(format!("{}", state.fg_opacity)).render(&(), ctx, fb);
-            let ctx = ctx.add_x(num_digits as i32 + 1);
-            for i in 0..slider_space_width {
-                fb.set_cell_relative_to_ctx(
-                    ctx,
-                    Coord::new(i as i32, 0),
-                    0,
-                    RenderCell {
-                        character: Some('-'),
-                        style: Style::plain_text(),
-                    },
-                );
-            }
-            for i in 0..slider_bar_width {
-                fb.set_cell_relative_to_ctx(
-                    ctx,
-                    Coord::new(slider_offset as i32 + i as i32, 0),
-                    0,
-                    RenderCell {
-                        character: Some('█'),
-                        style: Style::plain_text(),
-                    },
-                );
-            }
         }
         {
-            let slider_offset =
-                (state.bg_opacity as u32 * (slider_space_width - slider_bar_width)) / 255;
             let ctx = ctx.add_y(2);
             self.bg_label.render(&(), ctx, fb);
             let ctx = ctx.add_x(self.bg_label.string.len() as i32);
             text::StyledString::plain_text(format!("{}", state.bg_opacity)).render(&(), ctx, fb);
-            let ctx = ctx.add_x(num_digits as i32 + 1);
-            for i in 0..slider_space_width {
-                fb.set_cell_relative_to_ctx(
-                    ctx,
-                    Coord::new(i as i32, 0),
-                    0,
-                    RenderCell {
-                        character: Some('-'),
-                        style: Style::plain_text(),
-                    },
-                );
-            }
-            for i in 0..slider_bar_width {
-                fb.set_cell_relative_to_ctx(
-                    ctx,
-                    Coord::new(slider_offset as i32 + i as i32, 0),
-                    0,
-                    RenderCell {
-                        character: Some('█'),
-                        style: Style::plain_text(),
-                    },
-                );
-            }
         }
     }
     fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, event: Event) -> Self::Output {
@@ -800,13 +745,14 @@ impl Component for OpacityComponent {
             match mouse_input {
                 MouseInput::MousePress {
                     button: MouseButton::Left,
-                    coord,
+                    coord: _,
                 } => {
-                    let _ = coord;
+                    return Some(PopUp::FgOpacity);
                 }
                 _ => (),
             }
         }
+        None
     }
     fn size(&self, _state: &Self::State, _ctx: Ctx) -> Size {
         Size::new(40, 3)
@@ -817,7 +763,7 @@ struct ToolsComponent;
 
 impl Component for ToolsComponent {
     type Output = ();
-    type State = AppState;
+    type State = AppData;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
         for (i, tool) in state.tools.iter().enumerate() {
             let ctx = ctx.add_y(i as i32);
@@ -870,7 +816,7 @@ struct CanvasComponent;
 
 impl Component for CanvasComponent {
     type Output = ();
-    type State = AppState;
+    type State = AppData;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
         for (coord, &cell) in state.canvas_state.grid.enumerate() {
             let mut cell = cell;
@@ -986,7 +932,7 @@ impl GuiComponent {
         }
     }
 
-    fn child_ctxs<'a>(&self, state: &AppState, ctx: Ctx<'a>) -> GuiChildCtxs<'a> {
+    fn child_ctxs<'a>(&self, state: &AppData, ctx: Ctx<'a>) -> GuiChildCtxs<'a> {
         let palette_size = self.palette.size(state, ctx);
         let opacity_size = self.opacity.size(state, ctx);
         let tools_size = self.tools.size(state, ctx);
@@ -1011,8 +957,8 @@ impl GuiComponent {
 }
 
 impl Component for GuiComponent {
-    type Output = ();
-    type State = AppState;
+    type Output = Option<PopUp>;
+    type State = AppData;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
         let ctxs = self.child_ctxs(state, ctx);
         self.palette.render(state, ctxs.palette, fb);
@@ -1044,6 +990,15 @@ impl Component for GuiComponent {
             } else {
                 state.canvas_hover = None;
             }
+            if ctxs
+                .opacity
+                .bounding_box
+                .contains_coord(mouse_input.coord())
+            {
+                if let Some(popup) = self.opacity.update(state, ctxs.tools, event) {
+                    return Some(popup);
+                }
+            }
             match mouse_input {
                 MouseInput::MouseMove {
                     button: Some(MouseButton::Left),
@@ -1071,23 +1026,87 @@ impl Component for GuiComponent {
                 _ => (),
             }
         }
+        None
     }
     fn size(&self, _state: &Self::State, ctx: Ctx) -> Size {
         ctx.bounding_box.size()
     }
 }
 
+enum PopUp {
+    FgOpacity,
+}
+
+enum AppState {
+    Ui,
+    PopUp(PopUp),
+}
+
+fn gui_component() -> CF<Option<PopUp>, AppData> {
+    cf(GuiComponent::new())
+}
+
+fn pop_up_text() -> CF<Option<OrEscapeOrClickOut<String>>, AppData> {
+    on_state_then(|state: &mut AppData| {
+        cf(TextField::with_initial_string(
+            3,
+            format!("{}", state.fg_opacity),
+        ))
+        .ignore_state()
+        .with_title_horizontal(
+            styled_string(
+                "Enter foreground opacity (0 - 255):".to_string(),
+                Style::plain_text(),
+            ),
+            1,
+        )
+        .catch_escape_or_click_out()
+    })
+}
+
+fn pop_up_style<C: 'static + Component<State = AppData>>(
+    component: C,
+    title: Option<String>,
+) -> CF<C::Output, AppData> {
+    use chargrid::border::*;
+    cf(component)
+        .border(BorderStyle {
+            title,
+            chars: BorderChars::double_line_light().with_title_separators('╡', '╞'),
+            padding: BorderPadding::all(1),
+            ..Default::default()
+        })
+        .fill(Rgba32::new_grey(0))
+        .centre()
+        .overlay_tint(gui_component(), gridbugs::chargrid::core::TintDim(127), 1)
+}
+
+fn app_loop() -> CF<Option<app::Exit>, AppData> {
+    loop_(AppState::Ui, |state| match state {
+        AppState::Ui => gui_component().map(AppState::PopUp).continue_(),
+        AppState::PopUp(_) => pop_up_style(pop_up_text(), Some("Foreground Opacity".to_string()))
+            .map_side_effect(|result, data: &mut AppData| {
+                if let Ok(string) = result {
+                    if let Ok(opacity) = string.parse::<u8>() {
+                        data.fg_opacity = opacity;
+                    } else {
+                        println!(
+                            "Failed to parse \"{}\" as byte. Enter a number from 0 to 255.",
+                            string
+                        );
+                    }
+                }
+            })
+            .map_val(|| AppState::Ui)
+            .continue_(),
+    })
+}
+
 pub fn app(palette_path: PathBuf) -> App {
     let palette = Palette::load(palette_path).unwrap();
-    let app_state = AppState::new_with_palette(palette);
-    cf(GuiComponent::new())
-        .ignore_output()
+    let app_state = AppData::new_with_palette(palette);
+    app_loop()
         .with_state(app_state)
-        .catch_escape()
-        .map(|res| match res {
-            Err(Escape) => app::Exit,
-            Ok(output) => output,
-        })
         .clear_each_frame()
         .exit_on_close()
 }
