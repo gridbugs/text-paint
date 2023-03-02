@@ -12,7 +12,7 @@ serde = { version = "1.0", features = ["serde_derive"] }
 bincode = "1.3"
 
 [dependencies.gridbugs]
-version = "0.8"
+version = "0.9"
 features = [
     "chargrid_serialize",
     "chargrid_wgpu",
@@ -23,8 +23,8 @@ features = [
     "line_2d_serialize",
 ]
 
-[patch.crates-io]
-chargrid_common = { path = "/home/s/src/chargrid/common" }
-chargrid = { path = "/home/s/src/chargrid/chargrid" }
-chargrid_core = { path = "/home/s/src/chargrid/core" }
-chargrid_input = { path = "/home/s/src/chargrid/input" }
+#[patch.crates-io]
+#chargrid_common = { path = "/home/s/src/chargrid/common" }
+#chargrid = { path = "/home/s/src/chargrid/chargrid" }
+#chargrid_core = { path = "/home/s/src/chargrid/core" }
+#chargrid_input = { path = "/home/s/src/chargrid/input" }
