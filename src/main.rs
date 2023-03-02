@@ -7,6 +7,8 @@ mod palette;
 struct Args {
     palette_path: PathBuf,
     terminal: bool,
+    input_path: Option<PathBuf>,
+    output_path: PathBuf,
 }
 
 impl Args {
@@ -15,10 +17,14 @@ impl Args {
             let {
                 palette_path = opt_req("PATH", "palette").name('p');
                 terminal = flag("terminal").name('t').desc("run in a terminal");
+                input_path = opt_opt("PATH", "input").name('i');
+                output_path = opt_req("PATH", "output").name('o');
             } in {
                 Self {
                     palette_path,
                     terminal,
+                    input_path,
+                    output_path,
                 }
             }
         }
@@ -58,8 +64,10 @@ fn main() {
     let Args {
         palette_path,
         terminal,
+        input_path,
+        output_path,
     } = Args::parser().with_help_default().parse_env_or_exit();
-    let app = app::app(palette_path);
+    let app = app::app(palette_path, input_path, output_path);
     if terminal {
         use gridbugs::chargrid_ansi_terminal::{Context, XtermTrueColour};
         let context = Context::new().expect("Failed to initialize terminal");

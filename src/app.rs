@@ -5,13 +5,16 @@ use gridbugs::{
     line_2d,
     rgb_int::Rgb24,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    fmt, iter,
-    path::PathBuf,
+    fmt,
+    fs::File,
+    iter,
+    path::{Path, PathBuf},
 };
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum PaletteIndex {
     #[default]
     None,
@@ -27,7 +30,7 @@ impl PaletteIndex {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct PerPalette<T> {
     ch: T,
     fg: T,
@@ -36,7 +39,7 @@ struct PerPalette<T> {
 
 type PaletteIndices = PerPalette<Option<PaletteIndex>>;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum Tool {
     Pencil,
     Line,
@@ -75,6 +78,7 @@ impl Tool {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct PencilEvent {
     coords: HashMap<Coord, u32>,
     last_coord: Coord,
@@ -122,6 +126,7 @@ impl PencilEvent {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct FillEvent {
     start: Coord,
 }
@@ -148,6 +153,7 @@ impl FillEvent {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct LineEvent {
     start: Coord,
     end: Coord,
@@ -178,6 +184,7 @@ impl LineEvent {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct EraseEvent {
     coords: HashSet<Coord>,
     last_coord: Coord,
@@ -215,6 +222,7 @@ impl EraseEvent {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 enum DrawingEvent {
     Pencil(PencilEvent),
     Fill(FillEvent),
@@ -261,7 +269,7 @@ impl DrawingEvent {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Raster {
     grid: Grid<RenderCell>,
 }
@@ -343,11 +351,13 @@ impl Raster {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct DrawingEventWithRenderCell {
     drawing_event: DrawingEvent,
     render_cell: RenderCell,
 }
 
+#[derive(Serialize, Deserialize)]
 struct UndoBuffer {
     initial: Raster,
     events: Vec<DrawingEventWithRenderCell>,
@@ -391,94 +401,143 @@ impl UndoBuffer {
     }
 }
 
-struct AppData {
-    palette: Palette,
+#[derive(Serialize, Deserialize)]
+struct LivePaths {
+    palette_path: PathBuf,
+    output_path: PathBuf,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DrawingState {
     palette_indices: PaletteIndices,
-    palette_hover: PaletteIndices,
     tools: Vec<Tool>,
     tool_index: usize,
-    tool_hover: Option<usize>,
     canvas_state: Raster,
-    canvas_hover: Option<Coord>,
     current_event: Option<DrawingEvent>,
     undo_buffer: UndoBuffer,
     eyedrop_render_cell: Option<RenderCell>,
     fg_opacity: u8,
     bg_opacity: u8,
+    palette_hover: PaletteIndices,
+    tool_hover: Option<usize>,
+    canvas_hover: Option<Coord>,
 }
 
-impl AppData {
-    fn new_with_palette(palette: Palette) -> Self {
+impl DrawingState {
+    fn new() -> Self {
         let canvas_state = Raster::new(Size::new(100, 80));
         let undo_buffer = UndoBuffer::new(canvas_state.clone());
         Self {
-            palette,
             palette_indices: Default::default(),
-            palette_hover: Default::default(),
             tools: Tool::all(),
             tool_index: 0,
-            tool_hover: None,
             canvas_state,
-            canvas_hover: None,
             current_event: None,
             undo_buffer,
             eyedrop_render_cell: None,
             fg_opacity: 255,
             bg_opacity: 255,
+            palette_hover: Default::default(),
+            tool_hover: None,
+            canvas_hover: None,
+        }
+    }
+
+    fn load<P: AsRef<Path>>(path: P) -> Self {
+        use std::io::Read;
+        let mut file = File::open(path).unwrap();
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).unwrap();
+        bincode::deserialize(&data).unwrap()
+    }
+}
+
+struct AppData {
+    live_paths: LivePaths,
+    palette: Palette,
+    drawing_state: DrawingState,
+}
+
+impl AppData {
+    fn new_with_live_paths(live_paths: LivePaths, input_path: Option<PathBuf>) -> Self {
+        let palette = Palette::load(live_paths.palette_path.as_path()).unwrap();
+        let drawing_state = if let Some(input_path) = input_path {
+            DrawingState::load(input_path)
+        } else {
+            DrawingState::new()
+        };
+        Self {
+            live_paths,
+            palette,
+            drawing_state,
         }
     }
 
     fn get_ch(&self) -> Option<char> {
-        self.palette_indices
+        self.drawing_state
+            .palette_indices
             .ch?
             .option()
             .map(|i| self.palette.ch[i])
     }
 
     fn get_fg(&self) -> Option<Rgba32> {
-        self.palette_indices
+        self.drawing_state
+            .palette_indices
             .fg?
             .option()
-            .map(|i| self.palette.fg[i].to_rgba32(self.fg_opacity))
+            .map(|i| self.palette.fg[i].to_rgba32(self.drawing_state.fg_opacity))
     }
 
     fn get_bg(&self) -> Option<Rgba32> {
-        self.palette_indices
+        self.drawing_state
+            .palette_indices
             .bg?
             .option()
-            .map(|i| self.palette.bg[i].to_rgba32(self.bg_opacity))
+            .map(|i| self.palette.bg[i].to_rgba32(self.drawing_state.bg_opacity))
     }
 
     fn current_render_cell(&self) -> RenderCell {
-        self.eyedrop_render_cell.unwrap_or_else(|| RenderCell {
-            character: self.get_ch(),
-            style: Style::default()
-                .with_foreground_option(self.get_fg())
-                .with_background_option(self.get_bg()),
-        })
+        self.drawing_state
+            .eyedrop_render_cell
+            .unwrap_or_else(|| RenderCell {
+                character: self.get_ch(),
+                style: Style::default()
+                    .with_foreground_option(self.get_fg())
+                    .with_background_option(self.get_bg()),
+            })
     }
 
     fn current_tool(&self) -> Tool {
-        self.tools[self.tool_index]
+        self.drawing_state.tools[self.drawing_state.tool_index]
     }
 
     fn commit_current_event(&mut self) {
-        if let Some(drawing_event) = self.current_event.take() {
+        if let Some(drawing_event) = self.drawing_state.current_event.take() {
             let event = DrawingEventWithRenderCell {
                 drawing_event,
                 render_cell: self.current_render_cell(),
             };
-            self.canvas_state.commit_event(&event);
-            self.undo_buffer.commit_event(event);
+            self.drawing_state.canvas_state.commit_event(&event);
+            self.drawing_state.undo_buffer.commit_event(event);
         }
     }
 
     fn undo(&mut self) {
-        self.canvas_state = self.undo_buffer.undo();
+        self.drawing_state.canvas_state = self.drawing_state.undo_buffer.undo();
     }
 
     fn redo(&mut self) {
-        self.canvas_state = self.undo_buffer.redo();
+        self.drawing_state.canvas_state = self.drawing_state.undo_buffer.redo();
+    }
+
+    fn save(&self) {
+        // TODO handle errors
+        use std::io::Write;
+        let mut file = File::create(self.live_paths.output_path.as_path()).unwrap();
+        let data = bincode::serialize(&self.drawing_state).unwrap();
+        file.write_all(&data).unwrap();
+        println!("wrote to {}", self.live_paths.output_path.to_str().unwrap());
     }
 }
 
@@ -525,9 +584,9 @@ impl Component for PaletteComponent {
             .with_foreground(Rgba32::new_grey(0))
             .with_background(Rgba32::new_grey(255));
         {
-            let style = if state.palette_indices.ch == Some(PaletteIndex::None) {
+            let style = if state.drawing_state.palette_indices.ch == Some(PaletteIndex::None) {
                 select_style
-            } else if state.palette_hover.ch == Some(PaletteIndex::None) {
+            } else if state.drawing_state.palette_hover.ch == Some(PaletteIndex::None) {
                 hover_style
             } else {
                 Style::plain_text()
@@ -543,9 +602,9 @@ impl Component for PaletteComponent {
             );
         }
         {
-            let style = if state.palette_indices.fg == Some(PaletteIndex::None) {
+            let style = if state.drawing_state.palette_indices.fg == Some(PaletteIndex::None) {
                 select_style
-            } else if state.palette_hover.fg == Some(PaletteIndex::None) {
+            } else if state.drawing_state.palette_hover.fg == Some(PaletteIndex::None) {
                 hover_style
             } else {
                 Style::plain_text()
@@ -561,9 +620,9 @@ impl Component for PaletteComponent {
             );
         }
         {
-            let style = if state.palette_indices.bg == Some(PaletteIndex::None) {
+            let style = if state.drawing_state.palette_indices.bg == Some(PaletteIndex::None) {
                 select_style
-            } else if state.palette_hover.bg == Some(PaletteIndex::None) {
+            } else if state.drawing_state.palette_hover.bg == Some(PaletteIndex::None) {
                 hover_style
             } else {
                 Style::plain_text()
@@ -580,9 +639,9 @@ impl Component for PaletteComponent {
         }
         let ctx = ctx.add_x(1);
         for (i, &ch) in state.palette.ch.iter().enumerate() {
-            let style = if Some(PaletteIndex::Index(i)) == state.palette_indices.ch {
+            let style = if Some(PaletteIndex::Index(i)) == state.drawing_state.palette_indices.ch {
                 select_style
-            } else if Some(PaletteIndex::Index(i)) == state.palette_hover.ch {
+            } else if Some(PaletteIndex::Index(i)) == state.drawing_state.palette_hover.ch {
                 hover_style
             } else {
                 Style::plain_text()
@@ -601,13 +660,14 @@ impl Component for PaletteComponent {
             r as u16 + g as u16 + b as u16 > 320
         }
         for (i, &fg) in state.palette.fg.iter().enumerate() {
-            let character = if Some(PaletteIndex::Index(i)) == state.palette_indices.fg {
-                Some('*')
-            } else if Some(PaletteIndex::Index(i)) == state.palette_hover.fg {
-                Some('+')
-            } else {
-                None
-            };
+            let character =
+                if Some(PaletteIndex::Index(i)) == state.drawing_state.palette_indices.fg {
+                    Some('*')
+                } else if Some(PaletteIndex::Index(i)) == state.drawing_state.palette_hover.fg {
+                    Some('+')
+                } else {
+                    None
+                };
             let foreground = if black_foreground(fg) {
                 Rgba32::new_grey(0)
             } else {
@@ -626,13 +686,14 @@ impl Component for PaletteComponent {
             );
         }
         for (i, &bg) in state.palette.bg.iter().enumerate() {
-            let character = if Some(PaletteIndex::Index(i)) == state.palette_indices.bg {
-                Some('*')
-            } else if Some(PaletteIndex::Index(i)) == state.palette_hover.bg {
-                Some('+')
-            } else {
-                None
-            };
+            let character =
+                if Some(PaletteIndex::Index(i)) == state.drawing_state.palette_indices.bg {
+                    Some('*')
+                } else if Some(PaletteIndex::Index(i)) == state.drawing_state.palette_hover.bg {
+                    Some('+')
+                } else {
+                    None
+                };
             let foreground = if black_foreground(bg) {
                 Rgba32::new_grey(0)
             } else {
@@ -678,11 +739,11 @@ impl Component for PaletteComponent {
             }
             match mouse_input {
                 MouseInput::MouseMove { coord, .. } => {
-                    state.palette_hover.ch =
+                    state.drawing_state.palette_hover.ch =
                         ch_bb.coord_absolute_to_relative(coord).map(coord_to_index);
-                    state.palette_hover.fg =
+                    state.drawing_state.palette_hover.fg =
                         fg_bb.coord_absolute_to_relative(coord).map(coord_to_index);
-                    state.palette_hover.bg =
+                    state.drawing_state.palette_hover.bg =
                         bg_bb.coord_absolute_to_relative(coord).map(coord_to_index);
                 }
                 MouseInput::MousePress {
@@ -690,15 +751,15 @@ impl Component for PaletteComponent {
                     coord,
                 } => {
                     if let Some(coord) = ch_bb.coord_absolute_to_relative(coord) {
-                        state.palette_indices.ch = Some(coord_to_index(coord));
+                        state.drawing_state.palette_indices.ch = Some(coord_to_index(coord));
                     }
                     if let Some(coord) = fg_bb.coord_absolute_to_relative(coord) {
-                        state.palette_indices.fg = Some(coord_to_index(coord));
+                        state.drawing_state.palette_indices.fg = Some(coord_to_index(coord));
                     }
                     if let Some(coord) = bg_bb.coord_absolute_to_relative(coord) {
-                        state.palette_indices.bg = Some(coord_to_index(coord));
+                        state.drawing_state.palette_indices.bg = Some(coord_to_index(coord));
                     }
-                    state.eyedrop_render_cell = None;
+                    state.drawing_state.eyedrop_render_cell = None;
                 }
                 _ => (),
             }
@@ -731,13 +792,21 @@ impl Component for OpacityComponent {
             let ctx = ctx.add_y(1);
             self.fg_label.render(&(), ctx, fb);
             let ctx = ctx.add_x(self.fg_label.string.len() as i32);
-            text::StyledString::plain_text(format!("{}", state.fg_opacity)).render(&(), ctx, fb);
+            text::StyledString::plain_text(format!("{}", state.drawing_state.fg_opacity)).render(
+                &(),
+                ctx,
+                fb,
+            );
         }
         {
             let ctx = ctx.add_y(2);
             self.bg_label.render(&(), ctx, fb);
             let ctx = ctx.add_x(self.bg_label.string.len() as i32);
-            text::StyledString::plain_text(format!("{}", state.bg_opacity)).render(&(), ctx, fb);
+            text::StyledString::plain_text(format!("{}", state.drawing_state.bg_opacity)).render(
+                &(),
+                ctx,
+                fb,
+            );
         }
     }
     fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, event: Event) -> Self::Output {
@@ -765,11 +834,11 @@ impl Component for ToolsComponent {
     type Output = ();
     type State = AppData;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        for (i, tool) in state.tools.iter().enumerate() {
+        for (i, tool) in state.drawing_state.tools.iter().enumerate() {
             let ctx = ctx.add_y(i as i32);
-            if i == state.tool_index {
+            if i == state.drawing_state.tool_index {
                 text::StyledString::plain_text(format!("*{}*", tool)).render(&(), ctx, fb);
-            } else if Some(i) == state.tool_hover {
+            } else if Some(i) == state.drawing_state.tool_hover {
                 let asterisk = text::StyledString {
                     string: "*".to_string(),
                     style: Style::plain_text().with_foreground(Rgba32::new_grey(127)),
@@ -790,7 +859,7 @@ impl Component for ToolsComponent {
         if let Some(mouse_input) = event.mouse_input() {
             match mouse_input {
                 MouseInput::MouseMove { coord, .. } => {
-                    state.tool_hover = ctx
+                    state.drawing_state.tool_hover = ctx
                         .bounding_box
                         .coord_absolute_to_relative(coord)
                         .map(|c| c.y as usize);
@@ -800,7 +869,7 @@ impl Component for ToolsComponent {
                     coord,
                 } => {
                     if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                        state.tool_index = coord.y as usize;
+                        state.drawing_state.tool_index = coord.y as usize;
                     }
                 }
                 _ => (),
@@ -808,7 +877,7 @@ impl Component for ToolsComponent {
         }
     }
     fn size(&self, state: &Self::State, _ctx: Ctx) -> Size {
-        Size::new(10, state.tools.len() as u32)
+        Size::new(10, state.drawing_state.tools.len() as u32)
     }
 }
 
@@ -818,9 +887,9 @@ impl Component for CanvasComponent {
     type Output = ();
     type State = AppData;
     fn render(&self, state: &Self::State, ctx: Ctx, fb: &mut FrameBuffer) {
-        for (coord, &cell) in state.canvas_state.grid.enumerate() {
+        for (coord, &cell) in state.drawing_state.canvas_state.grid.enumerate() {
             let mut cell = cell;
-            if Some(coord) == state.canvas_hover {
+            if Some(coord) == state.drawing_state.canvas_hover {
                 cell.style.background = if let Some(background) = cell.background() {
                     Some(background.saturating_scalar_mul_div(4, 3))
                 } else {
@@ -829,9 +898,9 @@ impl Component for CanvasComponent {
             }
             fb.set_cell_relative_to_ctx(ctx, coord, 0, cell);
         }
-        if let Some(current_event) = state.current_event.as_ref() {
+        if let Some(current_event) = state.drawing_state.current_event.as_ref() {
             current_event.preview(
-                &state.canvas_state,
+                &state.drawing_state.canvas_state,
                 state.current_render_cell(),
                 ctx.add_depth(1),
                 fb,
@@ -840,7 +909,7 @@ impl Component for CanvasComponent {
     }
     fn update(&mut self, state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
         if let Some(mouse_input) = event.mouse_input() {
-            state.canvas_hover = ctx
+            state.drawing_state.canvas_hover = ctx
                 .bounding_box
                 .coord_absolute_to_relative(mouse_input.coord());
             if state.current_tool() == Tool::Eyedrop {
@@ -854,11 +923,13 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            if let Some(&render_cell) = state.canvas_state.grid.get(coord) {
-                                state.eyedrop_render_cell = Some(render_cell);
-                                state.palette_indices.ch = None;
-                                state.palette_indices.fg = None;
-                                state.palette_indices.bg = None;
+                            if let Some(&render_cell) =
+                                state.drawing_state.canvas_state.grid.get(coord)
+                            {
+                                state.drawing_state.eyedrop_render_cell = Some(render_cell);
+                                state.drawing_state.palette_indices.ch = None;
+                                state.drawing_state.palette_indices.fg = None;
+                                state.drawing_state.palette_indices.bg = None;
                             }
                         }
                     }
@@ -871,7 +942,8 @@ impl Component for CanvasComponent {
                         coord,
                     } => {
                         if let Some(coord) = ctx.bounding_box.coord_absolute_to_relative(coord) {
-                            state.current_event = state.current_tool().new_event(coord);
+                            state.drawing_state.current_event =
+                                state.current_tool().new_event(coord);
                         }
                     }
                     _ => (),
@@ -881,6 +953,7 @@ impl Component for CanvasComponent {
     }
     fn size(&self, state: &Self::State, ctx: Ctx) -> Size {
         state
+            .drawing_state
             .canvas_state
             .grid
             .size()
@@ -976,19 +1049,19 @@ impl Component for GuiComponent {
             {
                 self.palette.update(state, ctxs.palette, event)
             } else {
-                state.palette_hover.ch = None;
-                state.palette_hover.fg = None;
-                state.palette_hover.bg = None;
+                state.drawing_state.palette_hover.ch = None;
+                state.drawing_state.palette_hover.fg = None;
+                state.drawing_state.palette_hover.bg = None;
             }
             if ctxs.tools.bounding_box.contains_coord(mouse_input.coord()) {
                 self.tools.update(state, ctxs.tools, event)
             } else {
-                state.tool_hover = None;
+                state.drawing_state.tool_hover = None;
             }
             if ctxs.canvas.bounding_box.contains_coord(mouse_input.coord()) {
                 self.canvas.update(state, ctxs.canvas, event)
             } else {
-                state.canvas_hover = None;
+                state.drawing_state.canvas_hover = None;
             }
             if ctxs
                 .opacity
@@ -1004,7 +1077,7 @@ impl Component for GuiComponent {
                     button: Some(MouseButton::Left),
                     coord,
                 } => {
-                    if let Some(current_event) = state.current_event.as_mut() {
+                    if let Some(current_event) = state.drawing_state.current_event.as_mut() {
                         let border_padding_top_left = Coord::new(
                             self.canvas.style.padding.left as i32 + 1,
                             self.canvas.style.padding.top as i32 + 1,
@@ -1023,6 +1096,7 @@ impl Component for GuiComponent {
             match keyboard_input {
                 KeyboardInput::Char('u') => state.undo(),
                 KeyboardInput::Char('r') => state.redo(),
+                KeyboardInput::Char('s') => state.save(),
                 _ => (),
             }
         }
@@ -1050,7 +1124,7 @@ fn pop_up_text() -> CF<Option<OrEscapeOrClickOut<String>>, AppData> {
     on_state_then(|state: &mut AppData| {
         cf(TextField::with_initial_string(
             3,
-            format!("{}", state.fg_opacity),
+            format!("{}", state.drawing_state.fg_opacity),
         ))
         .ignore_state()
         .with_title_horizontal(
@@ -1088,7 +1162,7 @@ fn app_loop() -> CF<Option<app::Exit>, AppData> {
             .map_side_effect(|result, data: &mut AppData| {
                 if let Ok(string) = result {
                     if let Ok(opacity) = string.parse::<u8>() {
-                        data.fg_opacity = opacity;
+                        data.drawing_state.fg_opacity = opacity;
                     } else {
                         println!(
                             "Failed to parse \"{}\" as byte. Enter a number from 0 to 255.",
@@ -1102,11 +1176,14 @@ fn app_loop() -> CF<Option<app::Exit>, AppData> {
     })
 }
 
-pub fn app(palette_path: PathBuf) -> App {
-    let palette = Palette::load(palette_path).unwrap();
-    let app_state = AppData::new_with_palette(palette);
+pub fn app(palette_path: PathBuf, input_path: Option<PathBuf>, output_path: PathBuf) -> App {
+    let live_paths = LivePaths {
+        palette_path,
+        output_path,
+    };
+    let app_data = AppData::new_with_live_paths(live_paths, input_path);
     app_loop()
-        .with_state(app_state)
+        .with_state(app_data)
         .clear_each_frame()
         .exit_on_close()
 }

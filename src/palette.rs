@@ -1,8 +1,9 @@
 use gridbugs::rgb_int::Rgb24;
+use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 use toml;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Palette {
     pub fg: Vec<Rgb24>,
     pub bg: Vec<Rgb24>,

@@ -6,23 +6,25 @@ authors = ["Stephen Sherratt <stephen@sherra.tt>"]
 
 [dependencies]
 meap = "0.5"
-toml = "0.6"
+toml = "0.7"
 nom = "7.1"
+serde = { version = "1.0", features = ["serde_derive"] }
+bincode = "1.3"
 
 [dependencies.gridbugs]
 version = "0.8"
 features = [
-    "chargrid",
+    "chargrid_serialize",
     "chargrid_wgpu",
     "chargrid_ansi_terminal",
-    "rgb_int",
-    "grid_2d",
-    "direction",
-    "line_2d",
+    "rgb_int_serialize",
+    "grid_2d_serialize",
+    "direction_serialize",
+    "line_2d_serialize",
 ]
 
-#[patch.crates-io]
-#chargrid_common = { path = "/home/s/src/chargrid/common" }
-#chargrid = { path = "/home/s/src/chargrid/chargrid" }
-#chargrid_core = { path = "/home/s/src/chargrid/core" }
-#chargrid_input = { path = "/home/s/src/chargrid/input" }
+[patch.crates-io]
+chargrid_common = { path = "/home/s/src/chargrid/common" }
+chargrid = { path = "/home/s/src/chargrid/chargrid" }
+chargrid_core = { path = "/home/s/src/chargrid/core" }
+chargrid_input = { path = "/home/s/src/chargrid/input" }
