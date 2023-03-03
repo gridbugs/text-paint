@@ -23,8 +23,8 @@ features = [
     "line_2d_serialize",
 ]
 
-[patch.crates-io]
-chargrid_common = { path = "/home/s/src/chargrid/common" }
-chargrid = { path = "/home/s/src/chargrid/chargrid" }
-chargrid_core = { path = "/home/s/src/chargrid/core" }
-chargrid_input = { path = "/home/s/src/chargrid/input" }
+#[patch.crates-io]
+#chargrid_common = { path = "/home/s/src/chargrid/common" }
+#chargrid = { path = "/home/s/src/chargrid/chargrid" }
+#chargrid_core = { path = "/home/s/src/chargrid/core" }
+#chargrid_input = { path = "/home/s/src/chargrid/input" }
