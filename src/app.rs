@@ -809,14 +809,21 @@ impl Component for OpacityComponent {
             );
         }
     }
-    fn update(&mut self, _state: &mut Self::State, _ctx: Ctx, event: Event) -> Self::Output {
+    fn update(&mut self, _state: &mut Self::State, ctx: Ctx, event: Event) -> Self::Output {
         if let Some(mouse_input) = event.mouse_input() {
+            let mouse_input = mouse_input.relative_to_coord(ctx.top_left());
             match mouse_input {
                 MouseInput::MousePress {
                     button: MouseButton::Left,
-                    coord: _,
+                    coord: Coord { x: _, y: 1 },
                 } => {
                     return Some(PopUp::FgOpacity);
+                }
+                MouseInput::MousePress {
+                    button: MouseButton::Left,
+                    coord: Coord { x: _, y: 2 },
+                } => {
+                    return Some(PopUp::BgOpacity);
                 }
                 _ => (),
             }
@@ -1068,7 +1075,7 @@ impl Component for GuiComponent {
                 .bounding_box
                 .contains_coord(mouse_input.coord())
             {
-                if let Some(popup) = self.opacity.update(state, ctxs.tools, event) {
+                if let Some(popup) = self.opacity.update(state, ctxs.opacity, event) {
                     return Some(popup);
                 }
             }
@@ -1109,6 +1116,7 @@ impl Component for GuiComponent {
 
 enum PopUp {
     FgOpacity,
+    BgOpacity,
 }
 
 enum AppState {
@@ -1120,22 +1128,20 @@ fn gui_component() -> CF<Option<PopUp>, AppData> {
     cf(GuiComponent::new())
 }
 
-fn pop_up_text() -> CF<Option<OrEscapeOrClickOut<String>>, AppData> {
-    on_state_then(|state: &mut AppData| {
-        cf(TextField::with_initial_string(
-            3,
-            format!("{}", state.drawing_state.fg_opacity),
-        ))
-        .ignore_state()
-        .with_title_horizontal(
-            styled_string(
-                "Enter foreground opacity (0 - 255):".to_string(),
-                Style::plain_text(),
-            ),
-            1,
-        )
-        .catch_escape_or_click_out()
-    })
+fn opacity_text_field(initial_value: u8) -> CF<Option<OrEscapeOrClickOut<String>>, AppData> {
+    cf(TextField::with_initial_string(
+        3,
+        format!("{}", initial_value),
+    ))
+    .ignore_state()
+    .with_title_horizontal(
+        styled_string(
+            "Enter foreground opacity (0 - 255):".to_string(),
+            Style::plain_text(),
+        ),
+        1,
+    )
+    .catch_escape_or_click_out()
 }
 
 fn pop_up_style<C: 'static + Component<State = AppData>>(
@@ -1146,6 +1152,7 @@ fn pop_up_style<C: 'static + Component<State = AppData>>(
     cf(component)
         .border(BorderStyle {
             title,
+            title_style: Style::plain_text(),
             chars: BorderChars::double_line_light().with_title_separators('╡', '╞'),
             padding: BorderPadding::all(1),
             ..Default::default()
@@ -1155,24 +1162,51 @@ fn pop_up_style<C: 'static + Component<State = AppData>>(
         .overlay_tint(gui_component(), gridbugs::chargrid::core::TintDim(127), 1)
 }
 
+fn opacity_dialog(title: String, initial_value: u8) -> CF<Option<Option<u8>>, AppData> {
+    pop_up_style(opacity_text_field(initial_value), Some(title)).map(|result| {
+        if let Ok(string) = result {
+            if let Ok(opacity) = string.parse::<u8>() {
+                return Some(opacity);
+            } else {
+                println!(
+                    "Failed to parse \"{}\" as byte. Enter a number from 0 to 255.",
+                    string
+                );
+            }
+        }
+        None
+    })
+}
+
 fn app_loop() -> CF<Option<app::Exit>, AppData> {
     loop_(AppState::Ui, |state| match state {
         AppState::Ui => gui_component().map(AppState::PopUp).continue_(),
-        AppState::PopUp(_) => pop_up_style(pop_up_text(), Some("Foreground Opacity".to_string()))
-            .map_side_effect(|result, data: &mut AppData| {
-                if let Ok(string) = result {
-                    if let Ok(opacity) = string.parse::<u8>() {
-                        data.drawing_state.fg_opacity = opacity;
-                    } else {
-                        println!(
-                            "Failed to parse \"{}\" as byte. Enter a number from 0 to 255.",
-                            string
-                        );
-                    }
+        AppState::PopUp(PopUp::FgOpacity) => on_state_then(|state: &mut AppData| {
+            opacity_dialog(
+                "Foreground Opacity".to_string(),
+                state.drawing_state.fg_opacity,
+            )
+            .map_side_effect(|opacity, data| {
+                if let Some(opacity) = opacity {
+                    data.drawing_state.fg_opacity = opacity;
                 }
             })
             .map_val(|| AppState::Ui)
-            .continue_(),
+            .continue_()
+        }),
+        AppState::PopUp(PopUp::BgOpacity) => on_state_then(|state: &mut AppData| {
+            opacity_dialog(
+                "Background Opacity".to_string(),
+                state.drawing_state.bg_opacity,
+            )
+            .map_side_effect(|opacity, data| {
+                if let Some(opacity) = opacity {
+                    data.drawing_state.bg_opacity = opacity;
+                }
+            })
+            .map_val(|| AppState::Ui)
+            .continue_()
+        }),
     })
 }
 

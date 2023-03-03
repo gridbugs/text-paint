@@ -218,8 +218,6 @@ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 [[package]]
 name = "chargrid"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "904f498b125e27fd820c1d90a558c3d9a65c1702575b42bc146bb8c49b9590e8"
 dependencies = [
  "chargrid_common",
  "chargrid_core",
@@ -241,8 +239,6 @@ dependencies = [
 [[package]]
 name = "chargrid_common"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a23c85d5e88a5bf785dcfb1c5e1db790e6b336e3d79addc9cc339eca73bae0f"
 dependencies = [
  "chargrid_core",
 ]
@@ -250,8 +246,6 @@ dependencies = [
 [[package]]
 name = "chargrid_core"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc2a8db924be9035bd257368c6873e61653d037ea413f79d5feeea2335e50f75"
 dependencies = [
  "chargrid_input",
  "grid_2d",
@@ -262,8 +256,6 @@ dependencies = [
 [[package]]
 name = "chargrid_input"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c67803d25e39e131126a6222bc6d4c834378d6c8f64a08eb37535233a4ff45db"
 dependencies = [
  "coord_2d",
  "serde",
