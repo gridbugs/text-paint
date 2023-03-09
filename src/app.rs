@@ -425,7 +425,7 @@ struct DrawingState {
 
 impl DrawingState {
     fn new() -> Self {
-        let canvas_state = Raster::new(Size::new(100, 80));
+        let canvas_state = Raster::new(Size::new(80, 60));
         let undo_buffer = UndoBuffer::new(canvas_state.clone());
         Self {
             palette_indices: Default::default(),
@@ -538,6 +538,15 @@ impl AppData {
         let data = bincode::serialize(&self.drawing_state).unwrap();
         file.write_all(&data).unwrap();
         println!("wrote to {}", self.live_paths.output_path.to_str().unwrap());
+    }
+
+    fn export(&self) {
+        use std::io::Write;
+        let path = "/tmp/x.bin";
+        println!("exporting to {}", path);
+        let mut file = File::create(path).unwrap();
+        let data = bincode::serialize(&self.drawing_state.canvas_state.grid).unwrap();
+        file.write_all(&data).unwrap();
     }
 }
 
@@ -1104,6 +1113,7 @@ impl Component for GuiComponent {
                 KeyboardInput::Char('u') => state.undo(),
                 KeyboardInput::Char('r') => state.redo(),
                 KeyboardInput::Char('s') => state.save(),
+                KeyboardInput::Char('e') => state.export(),
                 _ => (),
             }
         }
