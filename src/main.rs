@@ -1,4 +1,4 @@
-use gridbugs::chargrid_wgpu;
+use chargrid_wgpu;
 use std::path::PathBuf;
 
 mod app;
@@ -69,7 +69,7 @@ fn main() {
     } = Args::parser().with_help_default().parse_env_or_exit();
     let app = app::app(palette_path, input_path, output_path);
     if terminal {
-        use gridbugs::chargrid_ansi_terminal::{Context, XtermTrueColour};
+        use chargrid_ansi_terminal::{Context, XtermTrueColour};
         let context = Context::new().expect("Failed to initialize terminal");
         let colour = XtermTrueColour;
         context.run(app, colour);

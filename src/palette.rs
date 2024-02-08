@@ -1,4 +1,4 @@
-use gridbugs::rgb_int::Rgb24;
+use rgb_int::Rgb24;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 use toml;

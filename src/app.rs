@@ -1,10 +1,8 @@
 use crate::palette::Palette;
-use gridbugs::{
-    chargrid::{self, border::Border, control_flow::*, prelude::*, text, text_field::TextField},
-    grid_2d::Grid,
-    line_2d,
-    rgb_int::Rgb24,
-};
+use chargrid::{self, border::Border, control_flow::*, prelude::*, text, text_field::TextField};
+use grid_2d::Grid;
+use line_2d;
+use rgb_int::Rgb24;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -323,7 +321,7 @@ impl Raster {
         }
     }
     fn flood_fill(&self, coord: Coord) -> HashSet<Coord> {
-        use gridbugs::direction::CardinalDirection;
+        use direction::CardinalDirection;
         use std::collections::VecDeque;
         let mut queue = VecDeque::new();
         let mut seen = HashSet::new();
@@ -1169,7 +1167,7 @@ fn pop_up_style<C: 'static + Component<State = AppData>>(
         })
         .fill(Rgba32::new_grey(0))
         .centre()
-        .overlay_tint(gui_component(), gridbugs::chargrid::core::TintDim(127), 1)
+        .overlay_tint(gui_component(), chargrid::core::TintDim(127), 1)
 }
 
 fn opacity_dialog(title: String, initial_value: u8) -> CF<Option<Option<u8>>, AppData> {
